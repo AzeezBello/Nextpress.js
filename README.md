@@ -2,142 +2,169 @@
 
 **A modern, WordPress-inspired content management system and visual website builder built with Next.js.**
 
-NextPress.js is intended to serve both people building their own websites and teams delivering websites for clients. The product will begin with dependable CMS fundamentals and grow toward a combined block editor and visual website builder.
+NextPress.js serves both people building their own websites and teams delivering websites for clients. It combines a structured, versioned block document schema (`schemaVersion: 1`) with role-based editorial workflows, private draft previews, revision recovery, and fast server-rendered public pages.
 
-> **Starter status:** This ZIP is a clean starter scaffold, not a completed CMS. Authentication, persistence, uploads, revisions, scheduling, and the full editor are not implemented yet. The dashboard is a front-end starting point using sample data. Do not use it for production content until the security and persistence layers are implemented and tested.
+---
 
-## Product principles
+## Product Principles
 
-1. **Audit before replacing.** This starter is intended to help establish a repository. If an existing NextPress repository already contains working functionality, audit it first and selectively port or merge these ideas instead of overwriting it.
-2. **One content model.** The block editor and future visual builder must operate on the same validated, versioned document format.
-3. **Core CMS first.** Pages, posts, media, access control, drafts, previews, publishing, and rendering precede advanced extensions.
-4. **Secure by default.** Server-side authorization, validated inputs, controlled block rendering, and explicit publication states are required.
-5. **Accessible, responsive UI.** Keyboard use, focus states, contrast, reduced motion, and mobile layouts are first-class requirements.
-6. **Incremental architecture.** Start as a modular Next.js application. Split packages or services only when there is a demonstrated reason.
+1. **One canonical content model.** The block editor, responsive previewer, and public renderer all operate on the same validated, versioned `ContentDocument` format.
+2. **Core CMS first.** Pages, posts, taxonomies, media metadata, role-based access control, drafts, previews, revisions, and publishing are built on solid server-side foundations.
+3. **Secure by default.** Server-side authorization (`requireSession`, `hasPermission`), runtime block validation (`validateAndNormalizeBlock`), URL sanitization (`sanitizeUrl`), and strict draft/published snapshot isolation prevent privilege escalation, XSS, and draft leakage.
+4. **Accessible, responsive UI.** Keyboard block reordering, focusable container-query tables, native `<dialog closedby="any">` modals with cross-browser fallbacks, balanced typography, and `prefers-reduced-motion` support are built in.
+5. **Zero-config local setup.** Powered by Node.js built-in `node:sqlite` (`data/nextpress.sqlite`), NextPress.js runs out of the box after `npm install` with automatic migrations and rich seed data—no external database server required for local development.
 
-## Included in this starter
+---
 
-- Next.js App Router + React + TypeScript.
-- Tailwind CSS with a small NextPress design-token palette.
-- A responsive starter dashboard with navigation and overview metrics.
-- Placeholder routes for pages, posts, media, and settings.
-- A public landing page explaining the product.
-- An illustrative shared content document type.
-- Architecture and product requirements in `PRD.md`.
-- Environment variable template and `.gitignore`.
+## Implemented Capabilities (Milestones 0, 1, 2 & Core Milestone 3)
 
-## Not implemented yet
+- **Authentication & Role-Based Access Control (`/login`):**
+  - Server-side session cookies (`np_session`) backed by SQLite.
+  - Four enforced site membership roles: `Owner`, `Administrator`, `Editor`, and `Author`.
+  - Instant 1-click demo role switcher on `/login` and in the dashboard header to test permission guardrails immediately.
+- **Multi-Site Workspaces:**
+  - Site-scoped content, media, taxonomies, and memberships.
+  - Pre-seeded with two workspaces: **NextPress Flagship** (`flagship`) and **Northwind Design Studio** (`northwind-studio`), switchable from the sidebar.
+- **Pages & Posts CRUD (`/pages`, `/posts`):**
+  - Create, search, filter by status (`all`, `published`, `draft`), edit, preview, publish, unpublish, and delete pages and posts.
+  - Separate `document_json` (working draft) and `published_document_json` (live public snapshot) so authors can iterate on drafts without mutating live content until published.
+- **Block Editor & Registered Block Schema (`/pages/[id]`, `/posts/[id]`):**
+  - Seven validated block types in `BLOCK_CATALOG`: `heading`, `paragraph`, `image`, `button`, `divider`, `callout`, and `columns`.
+  - Keyboard-friendly block reordering (Move Up / Move Down), duplication, removal, and a side-by-side Block Property Inspector.
+  - Built-in **Responsive Preview** tab (`Desktop`, `Tablet`, `Mobile`), **SEO & Taxonomies** tab, and **Revision History** tab with one-click version restore.
+- **Protected Previews & Public Rendering:**
+  - Private draft preview at `/preview/[id]` (requires authenticated site membership; sets `noindex, nofollow`).
+  - Public site rendering at `/s/[siteSlug]`, `/s/[siteSlug]/[slug]`, and `/s/[siteSlug]/blog/[slug]` with dynamic `generateMetadata`, OpenGraph tags, `/sitemap.xml`, and `/robots.txt`.
+- **Media Library (`/media`) & Site Settings (`/settings`):**
+  - Register media assets with MIME allowlist validation, 10 MB size limit, required `alt` text, and direct selection inside Image blocks.
+  - Configure site identity, custom domain, default SEO metadata, shared theme tokens (brand colors, heading font, border radius), and categories/tags.
+  - Audit log tracking (`audit_logs`) surfaced on `/dashboard`.
 
-- Authentication or user accounts.
-- Database connection, schema, migrations, or seed scripts.
-- Real create/update/delete APIs.
-- Media uploads or object storage.
-- Draft persistence, revision history, scheduling, or publishing.
-- A functional block editor or visual canvas.
-- Site tenancy, extension APIs, comments, forms, or custom post types.
-- Production security review or deployment verification.
+---
 
-## Requirements
+## Pre-Seeded Demo Accounts
 
-- Node.js 20 or newer.
-- npm 10 or compatible npm.
-- Git.
+All demo accounts share the default password `nextpress123` (or you can switch between them with 1 click in the UI):
 
-Check versions:
+| Name | Email | Role (`flagship`) | Permissions Summary |
+|---|---|---|---|
+| **Ada Lovelace** | `ada@nextpress.dev` | `Owner` | Full control over site settings, memberships, media, and publishing |
+| **Alex Rivera** | `alex@nextpress.dev` | `Administrator` | Manages site configuration, theme tokens, media, and all content publishing |
+| **Elena Rostova** | `elena@nextpress.dev` | `Editor` | Creates, edits, previews, publishes, and unpublishes any page or post |
+| **Marcus Vance** | `marcus@nextpress.dev` | `Author` | Creates and edits own drafts and media; cannot publish or modify site settings |
 
-```bash
-node --version
-npm --version
-git --version
-```
+---
 
-## Run locally
+## Requirements & Quickstart
 
-1. Extract the ZIP.
-2. Open a terminal in the `nextpress` directory.
-3. Install dependencies:
+- **Node.js:** `v22.5+` or `v24+` (uses built-in `node:sqlite`)
+- **npm:** `v10+`
+
+### Run Locally
+
+1. Install dependencies:
 
    ```bash
    npm install
    ```
 
-4. Copy the environment template if you want to prepare local configuration:
+2. (Optional) Copy environment variables template:
 
    ```bash
    cp .env.example .env.local
    ```
 
-   No environment variables are required to render the current scaffold.
+   By default, NextPress.js stores its SQLite database at `data/nextpress.sqlite` automatically. You can override the path with `NEXTPRESS_DB_PATH`.
 
-5. Start the development server:
+3. Start the development server:
 
    ```bash
    npm run dev
    ```
 
-6. Visit [http://localhost:3000](http://localhost:3000).
+4. Open the application:
+   - **Landing Page:** [http://localhost:3000](http://localhost:3000)
+   - **Sign In / Role Switcher:** [http://localhost:3000/login](http://localhost:3000/login)
+   - **CMS Dashboard:** [http://localhost:3000/dashboard](http://localhost:3000/dashboard)
+   - **Live Public Flagship Site:** [http://localhost:3000/s/flagship](http://localhost:3000/s/flagship)
+   - **Live Client Studio Site:** [http://localhost:3000/s/northwind-studio](http://localhost:3000/s/northwind-studio)
 
-## Available scripts
+---
+
+## Available Scripts
 
 ```bash
-npm run dev       # Start the local development server
-npm run build     # Create a production build
-npm run start     # Run a previously built app
-npm run typecheck # Run TypeScript checks
+npm run dev       # Start the local Next.js development server
+npm run build     # Create an optimized production build
+npm run start     # Start the production server from a completed build
+npm run typecheck # Run TypeScript compiler checks (tsc --noEmit)
+npm run lint      # Run ESLint flat-config checks
+npm test          # Run automated unit & integration tests (node:test)
 ```
 
-The starter includes an ESLint flat configuration using the Next.js Core Web Vitals and TypeScript rules. If you change the Next.js major version, review the matching ESLint configuration and run `npm run lint`.
+---
 
-## Project structure
+## Route & Module Architecture
 
 ```text
 nextpress/
 ├── docs/
-│   └── ARCHITECTURE.md
+│   ├── ARCHITECTURE.md               # Proposed modular monolith architecture
+│   ├── AUDIT-REPORT.md               # Milestone 0 repository audit report
+│   └── REPOSITORY-AUDIT-CHECKLIST.md # Baseline audit checklist
 ├── public/
-│   └── nextpress-mark.svg
+│   └── nextpress-mark.svg            # Default vector emblem
 ├── src/
 │   ├── app/
-│   │   ├── (dashboard)/
-│   │   │   ├── dashboard/
-│   │   │   ├── pages/
-│   │   │   ├── posts/
-│   │   │   ├── media/
-│   │   │   └── settings/
-│   │   ├── globals.css
-│   │   ├── layout.tsx
-│   │   └── page.tsx
+│   │   ├── (dashboard)/              # Authenticated CMS workspace routes
+│   │   │   ├── dashboard/page.tsx    # Overview metrics, recent items & audit feed
+│   │   │   ├── pages/page.tsx        # Pages directory & creation modal
+│   │   │   ├── pages/[id]/page.tsx   # Page block editor, preview, SEO & revisions
+│   │   │   ├── posts/page.tsx        # Posts directory & creation modal
+│   │   │   ├── posts/[id]/page.tsx   # Post block editor, taxonomies & revisions
+│   │   │   ├── media/page.tsx        # Media library manager
+│   │   │   └── settings/page.tsx     # Site identity, theme tokens, roles & taxonomies
+│   │   ├── login/page.tsx            # Sign-in form & 1-click demo persona switcher
+│   │   ├── preview/[id]/page.tsx     # Protected private draft preview route
+│   │   ├── s/[siteSlug]/             # Public site rendering routes
+│   │   │   ├── page.tsx              # Public site home page & latest posts
+│   │   │   ├── [slug]/page.tsx       # Public published page renderer
+│   │   │   └── blog/[slug]/page.tsx  # Public published blog post renderer
+│   │   ├── globals.css               # Tailwind v4 @theme tokens & responsive table styles
+│   │   ├── layout.tsx                # Root HTML layout
+│   │   ├── page.tsx                  # NextPress.js product landing page
+│   │   ├── robots.ts                 # Dynamic robots.txt generator
+│   │   └── sitemap.ts                # Dynamic sitemap.xml generator
 │   ├── components/
-│   │   ├── dashboard-shell.tsx
-│   │   └── sidebar-nav.tsx
+│   │   ├── block-editor.tsx          # Interactive block editor, inspector & revision UI
+│   │   ├── block-renderer.tsx        # Server-safe React renderer for ContentDocument
+│   │   ├── content-table.tsx         # Container-query table & native <dialog> modal
+│   │   ├── dashboard-shell.tsx       # Authenticated shell with header role switcher
+│   │   ├── media-manager.tsx         # Media asset grid & registration dialog
+│   │   ├── public-site-shell.tsx     # Public site header, nav, theme wrapper & footer
+│   │   ├── sidebar-nav.tsx           # Workspace navigation & multi-site switcher
+│   │   ├── sign-in-form.tsx          # Accessible autofill-compliant login form
+│   │   └── site-settings-form.tsx    # Site identity, design tokens & taxonomy forms
 │   └── lib/
-│       ├── content-types.ts
-│       └── utils.ts
-├── .env.example
-├── PRD.md
-├── README.md
+│       ├── actions.ts                # Server Actions for auth, CRUD, publishing & settings
+│       ├── auth.ts                   # Server session helpers (getCurrentSession, requireSession)
+│       ├── content-types.ts          # Block schemas, validators, URL sanitizer & migrations
+│       ├── db.ts                     # SQLite database, migrations, seed data & queries
+│       ├── permissions.ts            # RBAC permission matrix (Owner, Admin, Editor, Author)
+│       └── utils.ts                  # Class name utilities
+├── tests/
+│   ├── cms.test.mts                  # Automated unit & integration test suite
+│   └── register-alias.mjs            # Module path alias hook for node:test
+├── PRD.md                            # Product Requirements Document (v0.2)
+├── README.md                         # Project documentation
 └── package.json
 ```
 
-## Architecture direction
+---
 
-### Application shape
+## Canonical Content Document Contract
 
-Keep the first version as a modular monolith:
-
-- **Presentation:** App Router pages and reusable UI components.
-- **Domain:** content, publishing, sites, memberships, media, and permissions.
-- **Persistence:** PostgreSQL plus migrations, after confirming the existing project has no database to preserve.
-- **Identity:** Auth.js or a suitable managed identity provider, chosen after comparing deployment needs.
-- **File storage:** S3-compatible object storage; store file metadata in the database and binary objects in storage.
-- **Rendering:** a controlled registry maps validated block types to React renderers.
-- **Testing:** unit and integration tests for domain logic; end-to-end tests for publishing and authorization.
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the proposed module boundaries and data model.
-
-### Content document
-
-The editor should save structured content, not arbitrary executable code. An illustrative starting point:
+Every page and post stores a validated `ContentDocument` (`schemaVersion: 1`):
 
 ```ts
 type ContentDocument = {
@@ -147,103 +174,22 @@ type ContentDocument = {
 
 type ContentBlock = {
   id: string;
-  type: string;
+  type: "heading" | "paragraph" | "image" | "button" | "divider" | "callout" | "columns";
   version: number;
   props: Record<string, unknown>;
   children?: ContentBlock[];
 };
 ```
 
-Before production use, replace the broad `Record<string, unknown>` with validated schemas for each registered block. Persist the schema version and define migrations when document structures change. Never use `eval` or execute arbitrary saved JavaScript to render content.
+All incoming documents pass through `validateAndMigrateDocument()` and `validateAndNormalizeBlock()` in `src/lib/content-types.ts` before persistence and rendering, and all links/image sources pass through `sanitizeUrl()`.
 
-### Proposed database entities
+---
 
-- `User`
-- `Site`
-- `Membership`
-- `Page`
-- `Post`
-- `Taxonomy`
-- `MediaAsset`
-- `Revision`
-- `ThemeSettings`
+## Development Roadmap
 
-These are proposals, not a claim that the schema already exists. If adopting this scaffold into an existing repository, compare these entities against the current schema before adding anything.
-
-## Development roadmap
-
-### Phase 0 — Audit and baseline
-- Inspect the existing repository, branches, dependencies, build, tests, data model, and deployment.
-- Classify existing functionality as working, partial, broken, missing, or unverified.
-- Record the current commit and preserve a rollback path.
-- Decide what to retain, refactor, replace, or port.
-
-### Phase 1 — CMS foundation
-- Authentication, roles, site membership, and server-side authorization.
-- PostgreSQL schema and safe migrations.
-- Dashboard and content CRUD.
-- Pages, posts, taxonomies, and media metadata.
-- Draft and published states.
-
-### Phase 2 — Publishing
-- Shared block schema and registry.
-- Basic block editor and public renderer.
-- Preview access, slugs, SEO metadata, and cache invalidation.
-- Revisions, autosave, and recovery.
-
-### Phase 3 — Editorial completeness
-- Media uploads, alt text, and storage policies.
-- Scheduling, categories/tags, search, and import/export.
-- Accessibility, error handling, and comprehensive tests.
-
-### Phase 4 — Visual builder
-- Drag-and-drop canvas and component palette.
-- Reusable sections and templates.
-- Global design tokens and responsive controls.
-- Visual preview driven by the same content model.
-
-### Phase 5 — Extensibility
-- Custom content types and fields.
-- Public APIs, webhooks, and documented extension contracts.
-- Optional multi-site operations and multi-tenancy.
-- Performance, backup/restore, audit logs, and operational monitoring.
-
-## Quality gates
-
-Before calling a feature complete:
-
-- The main flow works in a browser, not just in code.
-- Type checks and production build pass.
-- Inputs are validated on the server.
-- Authorization is checked server-side for each protected operation.
-- Draft content cannot leak through public routes or caches.
-- UI works with keyboard navigation and reduced-motion preferences.
-- Tests cover normal, invalid, unauthorized, and failure cases.
-- Configuration and migrations are documented.
-
-## Design engineering resources
-
-Use these as review references, not as substitutes for implementation and testing:
-
-- [Taste-Skill](https://github.com/leonxlnx/taste-skill): art direction, layout, typography, spacing, and visual QA.
-- [Emil Kowalski's Design Engineering skill](https://github.com/emilkowalski/skills/blob/main/skills/emil-design-eng/SKILL.md): motion timing, easing, interaction feedback, loading states, and animation restraint.
-- [shadcn/ui](https://ui.shadcn.com/): accessible component foundations that should be customized to the NextPress design system.
-
-## Contribution workflow
-
-1. Create a feature branch.
-2. Read `PRD.md` and `docs/ARCHITECTURE.md`.
-3. Write or update acceptance criteria before implementing a feature.
-4. Keep changes small and avoid unrelated refactors.
-5. Run `npm run typecheck` and `npm run build`.
-6. Add tests as the persistence and domain layers are introduced.
-7. Document environment variables, migrations, and known limitations in the same change.
-
-## Security warning
-
-This starter has no authentication or persistence. Do not deploy it as a real CMS, upload private media, or place production secrets in source control. Before production, implement and test authentication, authorization, CSRF protections where applicable, rate limiting, input validation, upload restrictions, secure headers, backups, and secret management.
-
-## License
-
-No license is specified. Add a `LICENSE` file before distributing the project publicly or accepting external contributions.
-# Nextpress.js
+- **Phase 0 — Audit & Baseline:** ✅ Complete (`docs/AUDIT-REPORT.md`)
+- **Phase 1 — CMS Foundation:** ✅ Complete (Auth, RBAC, SQLite schema, multi-site, Pages/Posts/Media/Settings CRUD)
+- **Phase 2 — Publishing Vertical Slice:** ✅ Complete (Block schema & registry, Block Editor, Protected Preview, Public Renderer, SEO, Sitemap/Robots)
+- **Phase 3 — Editorial Completeness:** 🟡 In Progress (Revisions, Taxonomies, Audit Logs, and Media Validation complete; S3 binary upload adapter & scheduled publishing worker planned next)
+- **Phase 4 — Visual Builder:** ⏳ Planned (Drag-and-drop canvas manipulation, saved section templates, header/footer layout builder)
+- **Phase 5 — Extensibility:** ⏳ Planned (Custom content types, REST/webhook APIs, import/export, PostgreSQL adapter)

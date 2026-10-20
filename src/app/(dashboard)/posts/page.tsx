@@ -1,12 +1,24 @@
 import { DashboardShell } from "@/components/dashboard-shell";
+import { ContentTable } from "@/components/content-table";
+import { requireSession } from "@/lib/auth";
+import { listContentItems } from "@/lib/db";
 
-export default function PostsPage() {
+export default async function PostsPage() {
+  const session = await requireSession();
+  const posts = listContentItems(session.activeSite.id, { kind: "post" });
+
   return (
-    <DashboardShell active="/posts" title="Posts" description="Manage editorial content and publication status.">
-      <div className="rounded-2xl border border-dashed border-line bg-white p-10 text-center">
-        <h2 className="text-xl font-semibold">Posts are not connected yet</h2>
-        <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted">Implement post persistence, taxonomies, slugs, draft/published states, revisions, and public rendering as part of the CMS foundation.</p>
-      </div>
+    <DashboardShell
+      active="/posts"
+      title="Posts"
+      description="Manage editorial articles, categories, revisions, and publication status."
+    >
+      <ContentTable
+        kind="post"
+        items={posts}
+        siteSlug={session.activeSite.slug}
+        userRole={session.role}
+      />
     </DashboardShell>
   );
 }

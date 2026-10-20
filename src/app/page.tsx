@@ -1,61 +1,79 @@
 import Link from "next/link";
-import { ArrowRight, Blocks, Layers3, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Blocks, Globe, Layers3, ShieldCheck, Sparkles } from "lucide-react";
 
 const features = [
   {
     icon: Blocks,
-    title: "Structured content",
-    description: "Create pages with registered blocks and a content model designed to evolve."
+    title: "Structured content & block registry",
+    description: "Create pages and posts with validated block schemas, revision snapshots, and safe server-side rendering."
   },
   {
     icon: Layers3,
     title: "One system, two editors",
-    description: "Start with block editing, then add visual building without splitting the content format."
+    description: "Start with block editing and responsive previews, using a single canonical JSON document model."
   },
   {
     icon: ShieldCheck,
-    title: "Publishing with guardrails",
-    description: "Treat drafts, previews, permissions, and published content as distinct states."
+    title: "Publishing with role guardrails",
+    description: "Server-side authorization enforces Owner, Admin, Editor, and Author permissions with zero draft leakage."
   }
 ];
 
 export default function HomePage() {
   return (
     <main className="min-h-screen overflow-hidden">
-      <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-6 lg:px-10">
+      <nav className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-6 lg:px-10">
         <Link href="/" className="flex items-center gap-3 font-semibold tracking-tight">
           <span className="grid h-10 w-10 place-items-center rounded-2xl bg-brand text-white">
             <Layers3 size={21} aria-hidden="true" />
           </span>
           <span className="text-lg">NextPress<span className="text-brand">.js</span></span>
         </Link>
-        <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-medium text-white transition hover:bg-brand">
-          Open starter dashboard <ArrowRight size={16} aria-hidden="true" />
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/s/flagship"
+            className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-4 py-2.5 text-sm font-medium text-ink transition hover:border-brand hover:text-brand"
+          >
+            <Globe size={15} aria-hidden="true" />
+            Live Flagship Site
+          </Link>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-white transition hover:bg-brand"
+          >
+            Open CMS Dashboard <ArrowRight size={16} aria-hidden="true" />
+          </Link>
+        </div>
       </nav>
 
       <section className="mx-auto grid max-w-7xl items-center gap-12 px-6 pb-20 pt-14 lg:grid-cols-[1.05fr_.95fr] lg:px-10 lg:pb-28 lg:pt-24">
         <div>
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-line bg-white px-4 py-2 text-sm text-muted shadow-sm">
             <Sparkles size={15} className="text-brand" aria-hidden="true" />
-            A foundation for the next generation of publishing
+            Milestones 1 & 2 Active · SQLite + Block Editor + Public Renderer
           </div>
           <h1 className="max-w-3xl text-5xl font-semibold leading-[1.04] tracking-[-0.055em] sm:text-6xl lg:text-7xl">
             Publish with clarity. Build without limits.
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-8 text-muted">
-            NextPress.js is a proposed modern CMS for personal websites and client work, with a reliable publishing core and a path to visual site building.
+            NextPress.js is a modern CMS for personal websites and client work, featuring role-based authentication, a validated block editor, private previews, and responsive public rendering.
           </p>
           <div className="mt-9 flex flex-wrap gap-3">
-            <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-full bg-brand px-6 py-3.5 font-medium text-white shadow-soft transition hover:-translate-y-0.5 hover:bg-ink">
-              Explore the dashboard <ArrowRight size={17} aria-hidden="true" />
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-2 rounded-full bg-brand px-6 py-3.5 font-medium text-white shadow-soft transition hover:-translate-y-0.5 hover:bg-ink"
+            >
+              Open CMS Workspace <ArrowRight size={17} aria-hidden="true" />
             </Link>
-            <a href="https://github.com/leonxlnx/taste-skill" target="_blank" rel="noreferrer" className="rounded-full border border-line bg-white px-6 py-3.5 font-medium transition hover:border-brand">
-              Design reference
-            </a>
+            <Link
+              href="/s/flagship"
+              className="inline-flex items-center gap-2 rounded-full border border-line bg-white px-6 py-3.5 font-medium transition hover:border-brand hover:text-brand"
+            >
+              Visit Published Site (/s/flagship)
+            </Link>
           </div>
           <p className="mt-5 text-xs leading-5 text-muted">
-            Starter scaffold only. Authentication, database persistence, and publishing are not implemented yet.
+            Pre-seeded with demo roles (Owner, Admin, Editor, Author) and two multi-site workspaces (<code className="text-ink">flagship</code> &amp; <code className="text-ink">northwind-studio</code>).
           </p>
         </div>
 
@@ -64,10 +82,10 @@ export default function HomePage() {
           <div className="relative rounded-[2rem] border border-line bg-white p-4 shadow-soft sm:p-6">
             <div className="flex items-center justify-between border-b border-line pb-4">
               <div>
-                <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted">Workspace preview</p>
-                <p className="mt-1 text-lg font-semibold">Your site, in progress</p>
+                <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted">Live Publishing Pipeline</p>
+                <p className="mt-1 text-lg font-semibold">Create → Edit Blocks → Preview → Publish</p>
               </div>
-              <span className="rounded-full bg-brand-soft px-3 py-1.5 text-xs font-medium text-brand">Draft</span>
+              <span className="rounded-full bg-brand-soft px-3 py-1.5 text-xs font-medium text-brand">Published</span>
             </div>
             <div className="mt-5 grid grid-cols-[74px_1fr] gap-4">
               <div className="space-y-3 rounded-2xl bg-canvas p-3">
@@ -101,8 +119,10 @@ export default function HomePage() {
               </div>
             </div>
             <div className="mt-5 flex items-center justify-between rounded-xl bg-ink px-4 py-3 text-white">
-              <span className="text-sm">Ready for your next idea?</span>
-              <span className="rounded-full bg-white/15 px-3 py-1.5 text-xs">Preview UI</span>
+              <span className="text-sm">Ready to edit your first page?</span>
+              <Link href="/login" className="rounded-full bg-white/15 px-3 py-1.5 text-xs hover:bg-white/25">
+                Sign in with 1 click →
+              </Link>
             </div>
           </div>
         </div>
@@ -113,7 +133,7 @@ export default function HomePage() {
           <div className="max-w-2xl">
             <p className="text-sm font-semibold uppercase tracking-[0.16em] text-brand">The foundation</p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">A reliable CMS before a bigger builder.</h2>
-            <p className="mt-4 leading-7 text-muted">The first priority is a complete publishing journey. Visual building and extension capabilities can grow on top of a stable content engine.</p>
+            <p className="mt-4 leading-7 text-muted">The complete publishing journey is wired end-to-end on a versioned block schema and local SQLite persistence.</p>
           </div>
           <div className="mt-10 grid gap-4 md:grid-cols-3">
             {features.map(({ icon: Icon, title, description }) => (
@@ -129,7 +149,7 @@ export default function HomePage() {
         </div>
       </section>
       <footer className="mx-auto flex max-w-7xl flex-col gap-2 px-6 py-8 text-sm text-muted sm:flex-row sm:items-center sm:justify-between lg:px-10">
-        <span>© {new Date().getFullYear()} NextPress.js starter</span>
+        <span>© {new Date().getFullYear()} NextPress.js</span>
         <span>Built to evolve, one reliable release at a time.</span>
       </footer>
     </main>
