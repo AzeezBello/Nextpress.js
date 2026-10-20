@@ -7,6 +7,7 @@ import {
   getSiteBySlug,
   listPublishedContentForSite
 } from "@/lib/db";
+import { buildSchemaGraph, resolveSmartTags } from "@/lib/seo-engine";
 import { PublicSiteShell } from "@/components/public-site-shell";
 import { BlockDocumentRenderer } from "@/components/block-renderer";
 
@@ -20,8 +21,20 @@ export async function generateMetadata({
   if (!site) return { title: "Site Not Found" };
 
   const homePublished = getPublishedContentBySlug(siteSlug, "page", "home");
-  const title =
-    homePublished?.item.seo.metaTitle || site.seoDefaults.metaTitle || site.name;
+  const rawTitle =
+    homePublished?.item.seo.metaTitle ||
+    site.seoDefaults.metaTitle ||
+    site.seoDefaults.titleTemplatePage ||
+    site.name;
+  const title = resolveSmartTags(rawTitle, {
+    title: homePublished?.item.title || site.name,
+    excerpt: homePublished?.item.excerpt || site.description,
+    siteName: site.name,
+    tagline: site.tagline,
+    separator: site.seoDefaults.titleSeparator || "—",
+    authorName: homePublished?.item.authorName
+  });
+
   const description =
     homePublished?.item.seo.metaDescription ||
     site.seoDefaults.metaDescription ||
@@ -34,9 +47,10 @@ export async function generateMetadata({
       ? { canonical: site.seoDefaults.canonicalUrl }
       : undefined,
     openGraph: {
-      title,
-      description,
-      type: "website"
+      title: homePublished?.item.seo.ogTitle || title,
+      description: homePublished?.item.seo.ogDescription || description,
+      type: "website",
+      images: homePublished?.item.seo.ogImage ? [homePublished.item.seo.ogImage] : undefined
     }
   };
 }
@@ -56,8 +70,26 @@ export default async function PublicSiteHomePage({
   const publishedPosts = listPublishedContentForSite(site.id, "post");
   const homePublished = getPublishedContentBySlug(siteSlug, "page", "home");
 
+  const schemaGraph = homePublished
+    ? buildSchemaGraph({
+        site,
+        item: {
+          ...homePublished.item,
+          document: homePublished.renderDocument
+        },
+        baseUrl: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+      })
+    : null;
+
   return (
     <PublicSiteShell site={site} navPages={navPages} activeSlug="home">
+      {schemaGraph ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(schemaGraph) }}
+        />
+      ) : null}
+
       {homePublished ? (
         <article className="rounded-3xl border border-line bg-white p-8 shadow-soft sm:p-12">
           <BlockDocumentRenderer document={homePublished.renderDocument} />

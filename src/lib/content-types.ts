@@ -1,6 +1,6 @@
 /**
- * Canonical content document schema, block registry types, and runtime validators
- * for NextPress.js.
+ * Canonical content document schema, block registry types, SEO contracts,
+ * and runtime validators for NextPress.js.
  */
 
 export const CURRENT_DOCUMENT_SCHEMA_VERSION = 1;
@@ -16,7 +16,8 @@ export type BlockType =
   | "button"
   | "divider"
   | "callout"
-  | "columns";
+  | "columns"
+  | "faq";
 
 export type TextAlign = "left" | "center" | "right";
 
@@ -68,6 +69,17 @@ export type ColumnsBlockProps = {
   items: ColumnsBlockItem[];
 };
 
+export type FaqBlockItem = {
+  question: string;
+  answer: string;
+};
+
+export type FaqBlockProps = {
+  title?: string;
+  exclusive?: boolean;
+  items: FaqBlockItem[];
+};
+
 export type ContentBlock = {
   id: string;
   type: BlockType;
@@ -81,12 +93,88 @@ export type ContentDocument = {
   blocks: ContentBlock[];
 };
 
+export type SchemaEntityType =
+  | "Article"
+  | "BlogPosting"
+  | "NewsArticle"
+  | "WebPage"
+  | "FAQPage"
+  | "Product"
+  | "Course"
+  | "JobPosting"
+  | "LocalBusiness";
+
+export const SCHEMA_ENTITY_TYPES: readonly SchemaEntityType[] = [
+  "WebPage",
+  "Article",
+  "BlogPosting",
+  "NewsArticle",
+  "FAQPage",
+  "Product",
+  "Course",
+  "JobPosting",
+  "LocalBusiness"
+] as const;
+
 export type SeoMetadata = {
   metaTitle?: string;
   metaDescription?: string;
+  focusKeyword?: string;
+  secondaryKeywords?: string[];
+  isCornerstone?: boolean;
   canonicalUrl?: string;
+  schemaType?: SchemaEntityType;
+  ogTitle?: string;
+  ogDescription?: string;
   ogImage?: string;
+  twitterCard?: "summary_large_image" | "summary";
   noIndex?: boolean;
+  noFollow?: boolean;
+  noArchive?: boolean;
+  noSnippet?: boolean;
+  maxImagePreview?: "large" | "standard" | "none";
+  breadcrumbTitle?: string;
+  // Site-level Knowledge Graph, Smart Tag Templates, Local SEO & Robots (stored in site.seoDefaults)
+  titleSeparator?: string;
+  titleTemplatePage?: string;
+  titleTemplatePost?: string;
+  knowledgeGraphType?: "Organization" | "Person" | "LocalBusiness";
+  organizationName?: string;
+  organizationLogo?: string;
+  localBusinessCategory?: string;
+  phone?: string;
+  streetAddress?: string;
+  addressLocality?: string;
+  postalCode?: string;
+  addressCountry?: string;
+  openingHours?: string;
+  socialProfiles?: string[];
+  customRobotsTxt?: string;
+};
+
+export type RedirectStatusCode = 301 | 302 | 307 | 410 | 451;
+
+export type RedirectRecord = {
+  id: string;
+  siteId: string;
+  sourcePath: string;
+  destinationUrl: string;
+  statusCode: RedirectStatusCode;
+  isRegex: boolean;
+  hits: number;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NotFoundLogRecord = {
+  id: string;
+  siteId: string;
+  path: string;
+  referrer: string;
+  hits: number;
+  lastSeenAt: string;
+  createdAt: string;
 };
 
 export type ThemeSettings = {
@@ -111,6 +199,9 @@ export type ContentSummary = {
   publishedAt: string | null;
   updatedAt: string;
   createdAt: string;
+  focusKeyword?: string;
+  isCornerstone?: boolean;
+  seoScore?: number;
 };
 
 export type ContentItemRecord = ContentSummary & {
@@ -183,7 +274,8 @@ export const REGISTERED_BLOCK_TYPES: readonly BlockType[] = [
   "button",
   "divider",
   "callout",
-  "columns"
+  "columns",
+  "faq"
 ] as const;
 
 export const BLOCK_CATALOG: Record<
@@ -246,6 +338,24 @@ export const BLOCK_CATALOG: Record<
       items: [
         { title: "Structured schema", body: "Every block is validated before saving and rendering." },
         { title: "Fast public pages", body: "Published routes ship clean HTML without editor overhead." }
+      ]
+    }
+  },
+  faq: {
+    label: "FAQ Schema Accordion",
+    description: "Accessible <details> Q&A block that auto-generates FAQPage JSON-LD schema.",
+    defaultProps: {
+      title: "Frequently Asked Questions",
+      exclusive: true,
+      items: [
+        {
+          question: "How does NextPress.js handle technical SEO and Schema markup?",
+          answer: "NextPress.js automatically generates a unified Schema.org JSON-LD graph, XML sitemaps, OpenGraph tags, and real-time TruSEO/Readability scores out of the box."
+        },
+        {
+          question: "What happens if I change a published page's URL slug?",
+          answer: "NextPress.js automatically creates a 301 permanent redirect from the old slug to the new slug so search rankings and incoming links are preserved."
+        }
       ]
     }
   }
@@ -317,20 +427,27 @@ export function validateAndNormalizeBlock(raw: unknown): {
     return { valid: false, error: "Block must be an object." };
   }
   const obj = raw as Record<string, unknown>;
-  const id = typeof obj.id === "string" && obj.id.trim() ? obj.id.trim().slice(0, 64) : `blk_${Math.random().toString(36).slice(2, 10)}`;
+  const id =
+    typeof obj.id === "string" && obj.id.trim()
+      ? obj.id.trim().slice(0, 64)
+      : `blk_${Math.random().toString(36).slice(2, 10)}`;
   const type = obj.type as BlockType;
 
   if (!REGISTERED_BLOCK_TYPES.includes(type)) {
     return { valid: false, error: `Unregistered block type: ${String(obj.type)}` };
   }
 
-  const rawProps = (obj.props && typeof obj.props === "object" ? obj.props : {}) as Record<string, unknown>;
+  const rawProps = (obj.props && typeof obj.props === "object" ? obj.props : {}) as Record<
+    string,
+    unknown
+  >;
   let normalizedProps: Record<string, unknown> = {};
 
   switch (type) {
     case "heading": {
       const rawLevel = Number(rawProps.level);
-      const level = rawLevel === 1 || rawLevel === 2 || rawLevel === 3 || rawLevel === 4 ? rawLevel : 2;
+      const level =
+        rawLevel === 1 || rawLevel === 2 || rawLevel === 3 || rawLevel === 4 ? rawLevel : 2;
       normalizedProps = {
         text: clampText(rawProps.text, 500, "Untitled heading"),
         level,
@@ -349,7 +466,9 @@ export function validateAndNormalizeBlock(raw: unknown): {
     case "image": {
       const ratio = rawProps.aspectRatio;
       const aspectRatio =
-        ratio === "16:9" || ratio === "4:3" || ratio === "1:1" || ratio === "auto" ? ratio : "16:9";
+        ratio === "16:9" || ratio === "4:3" || ratio === "1:1" || ratio === "auto"
+          ? ratio
+          : "16:9";
       normalizedProps = {
         url: sanitizeUrl(rawProps.url, "/nextpress-mark.svg"),
         alt: clampText(rawProps.alt, 500, ""),
@@ -401,6 +520,22 @@ export function validateAndNormalizeBlock(raw: unknown): {
       normalizedProps = {
         columns: cols,
         items: items.length > 0 ? items : BLOCK_CATALOG.columns.defaultProps.items
+      };
+      break;
+    }
+    case "faq": {
+      const rawItems = Array.isArray(rawProps.items) ? rawProps.items : [];
+      const items: FaqBlockItem[] = rawItems.slice(0, 12).map((item) => {
+        const it = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+        return {
+          question: clampText(it.question, 300, "Question?"),
+          answer: clampText(it.answer, 4000, "Answer.")
+        };
+      });
+      normalizedProps = {
+        title: clampText(rawProps.title, 200, "Frequently Asked Questions"),
+        exclusive: rawProps.exclusive !== undefined ? Boolean(rawProps.exclusive) : true,
+        items: items.length > 0 ? items : BLOCK_CATALOG.faq.defaultProps.items
       };
       break;
     }
@@ -460,11 +595,60 @@ export function validateAndMigrateDocument(raw: unknown): {
 export function validateSeoMetadata(raw: unknown): SeoMetadata {
   if (!raw || typeof raw !== "object") return {};
   const obj = raw as Record<string, unknown>;
+  const rawSchemaType = obj.schemaType as SchemaEntityType | undefined;
+  const schemaType =
+    rawSchemaType && SCHEMA_ENTITY_TYPES.includes(rawSchemaType) ? rawSchemaType : undefined;
+
+  const rawSecondary = Array.isArray(obj.secondaryKeywords) ? obj.secondaryKeywords : [];
+  const secondaryKeywords = rawSecondary
+    .map((k) => clampText(k, 80, "").trim())
+    .filter(Boolean)
+    .slice(0, 5);
+
+  const rawSocial = Array.isArray(obj.socialProfiles) ? obj.socialProfiles : [];
+  const socialProfiles = rawSocial
+    .map((u) => sanitizeUrl(u, ""))
+    .filter(Boolean)
+    .slice(0, 10);
+
   return {
-    metaTitle: clampText(obj.metaTitle, 160, ""),
-    metaDescription: clampText(obj.metaDescription, 320, ""),
+    metaTitle: clampText(obj.metaTitle, 180, ""),
+    metaDescription: clampText(obj.metaDescription, 360, ""),
+    focusKeyword: clampText(obj.focusKeyword, 100, ""),
+    secondaryKeywords,
+    isCornerstone: Boolean(obj.isCornerstone),
     canonicalUrl: obj.canonicalUrl ? sanitizeUrl(obj.canonicalUrl, "") : "",
+    schemaType,
+    ogTitle: clampText(obj.ogTitle, 180, ""),
+    ogDescription: clampText(obj.ogDescription, 360, ""),
     ogImage: obj.ogImage ? sanitizeUrl(obj.ogImage, "") : "",
-    noIndex: Boolean(obj.noIndex)
+    twitterCard: obj.twitterCard === "summary" ? "summary" : "summary_large_image",
+    noIndex: Boolean(obj.noIndex),
+    noFollow: Boolean(obj.noFollow),
+    noArchive: Boolean(obj.noArchive),
+    noSnippet: Boolean(obj.noSnippet),
+    maxImagePreview:
+      obj.maxImagePreview === "standard" || obj.maxImagePreview === "none"
+        ? obj.maxImagePreview
+        : "large",
+    breadcrumbTitle: clampText(obj.breadcrumbTitle, 120, ""),
+    titleSeparator: clampText(obj.titleSeparator, 5, "|") || "|",
+    titleTemplatePage: clampText(obj.titleTemplatePage, 180, "%%title%% %%sep%% %%sitename%%"),
+    titleTemplatePost: clampText(obj.titleTemplatePost, 180, "%%title%% %%sep%% %%sitename%%"),
+    knowledgeGraphType:
+      obj.knowledgeGraphType === "Person" || obj.knowledgeGraphType === "LocalBusiness"
+        ? obj.knowledgeGraphType
+        : "Organization",
+    organizationName: clampText(obj.organizationName, 160, ""),
+    organizationLogo: obj.organizationLogo ? sanitizeUrl(obj.organizationLogo, "") : "",
+    localBusinessCategory: clampText(obj.localBusinessCategory, 100, "ProfessionalService"),
+    phone: clampText(obj.phone, 50, ""),
+    streetAddress: clampText(obj.streetAddress, 200, ""),
+    addressLocality: clampText(obj.addressLocality, 100, ""),
+    postalCode: clampText(obj.postalCode, 40, ""),
+    addressCountry: clampText(obj.addressCountry, 60, ""),
+    openingHours: clampText(obj.openingHours, 160, ""),
+    socialProfiles,
+    customRobotsTxt: clampText(obj.customRobotsTxt, 4000, "")
   };
 }

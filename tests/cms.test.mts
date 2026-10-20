@@ -12,15 +12,27 @@ import {
   createContentItem,
   createSessionForUser,
   getPublishedContentBySlug,
+  installNodePluginPackage,
+  listNotFoundLogs,
   listRevisions,
+  listSitePlugins,
+  logNotFoundHit,
+  matchRedirectForPath,
   registerMediaAsset,
   resetDbForTests,
   restoreRevision,
   setContentPublicationStatus,
   switchSessionActiveSite,
+  toggleSitePlugin,
   updateContentItem,
   updateSiteSettings
 } from "../src/lib/db.ts";
+import {
+  analyzeSeoAndReadability,
+  buildSchemaGraph,
+  resolveSmartTags
+} from "../src/lib/seo-engine.ts";
+import { isValidNpmPackageName } from "../src/lib/plugins.ts";
 
 describe("NextPress.js Core CMS & Publishing Suite", () => {
   beforeEach(() => {
@@ -266,5 +278,114 @@ describe("NextPress.js Core CMS & Publishing Suite", () => {
     });
     assert.equal(docMigration.valid, true);
     assert.equal(docMigration.document.schemaVersion, 1);
+  });
+
+  it("evaluates Rank Math + Yoast + AIOSEO Smart Tags, TruSEO score, and Schema.org @graph", () => {
+    const resolvedTitle = resolveSmartTags("%%title%% %%sep%% %%sitename%% (%%current_year%%)", {
+      title: "Block Registry Guide",
+      excerpt: "Deep dive",
+      siteName: "NextPress Flagship",
+      tagline: "Publish with clarity",
+      separator: "—"
+    });
+    assert.ok(resolvedTitle.includes("Block Registry Guide — NextPress Flagship"));
+
+    const homePublished = getPublishedContentBySlug("flagship", "page", "home");
+    assert.ok(homePublished);
+
+    const report = analyzeSeoAndReadability({
+      title: homePublished.item.title,
+      slug: homePublished.item.slug,
+      excerpt: homePublished.item.excerpt,
+      kind: homePublished.item.kind,
+      document: homePublished.renderDocument,
+      seo: homePublished.item.seo,
+      siteName: homePublished.site.name,
+      siteTagline: homePublished.site.tagline
+    });
+    assert.ok(report.overallScore > 0 && report.overallScore <= 100);
+    assert.equal(report.checks.length, 15);
+
+    const graph = buildSchemaGraph({
+      site: homePublished.site,
+      item: {
+        ...homePublished.item,
+        document: homePublished.renderDocument
+      },
+      baseUrl: "http://localhost:3000"
+    }) as { "@graph": Array<Record<string, unknown>> };
+
+    assert.ok(Array.isArray(graph["@graph"]));
+    const hasFaqEntity = graph["@graph"].some((node) => node["@type"] === "FAQPage");
+    assert.equal(hasFaqEntity, true);
+  });
+
+  it("auto-creates a 301 redirect when a published slug changes and logs 404 hits", () => {
+    const aboutPublished = getPublishedContentBySlug("flagship", "page", "about");
+    assert.ok(aboutPublished);
+
+    // Rename published page slug from "about" to "about-nextpress"
+    const updated = updateContentItem({
+      siteId: "site_flagship",
+      contentId: aboutPublished.item.id,
+      actorId: "usr_admin",
+      title: aboutPublished.item.title,
+      slug: "about-nextpress",
+      excerpt: aboutPublished.item.excerpt,
+      document: aboutPublished.item.document,
+      seo: aboutPublished.item.seo
+    });
+    assert.equal(updated.ok, true);
+
+    const matched = matchRedirectForPath("site_flagship", "/s/flagship/about");
+    assert.ok(matched);
+    assert.equal(matched.redirect.statusCode, 301);
+    assert.equal(matched.resolvedDestination, "/s/flagship/about-nextpress");
+
+    logNotFoundHit({
+      siteId: "site_flagship",
+      path: "/s/flagship/missing-route-test",
+      referrer: "https://example.com"
+    });
+    const logs = listNotFoundLogs("site_flagship");
+    assert.ok(logs.some((l) => l.path === "/s/flagship/missing-route-test"));
+  });
+
+  it("validates and manages Node package plugins per site", () => {
+    assert.equal(isValidNpmPackageName("@nextpress/plugin-newsletter"), true);
+    assert.equal(isValidNpmPackageName("nextpress-plugin-stripe"), true);
+    assert.equal(isValidNpmPackageName("INVALID PACKAGE NAME!!"), false);
+
+    const initialPlugins = listSitePlugins("site_flagship");
+    assert.ok(initialPlugins.length >= 4);
+
+    // Editor cannot install Node plugins
+    const forbiddenInstall = installNodePluginPackage({
+      siteId: "site_flagship",
+      actorId: "usr_editor",
+      packageName: "@nextpress/plugin-newsletter"
+    });
+    assert.equal(forbiddenInstall.ok, false);
+
+    // Owner installs and toggles a Node package plugin
+    const installed = installNodePluginPackage({
+      siteId: "site_flagship",
+      actorId: "usr_owner",
+      packageName: "@nextpress/plugin-newsletter",
+      displayName: "NextPress Newsletter Capture",
+      version: "1.4.0"
+    });
+    assert.equal(installed.ok, true);
+    if (!installed.ok) return;
+
+    assert.equal(installed.plugin.enabled, true);
+
+    const toggled = toggleSitePlugin({
+      siteId: "site_flagship",
+      actorId: "usr_owner",
+      pluginId: installed.plugin.id,
+      enabled: false
+    });
+    assert.equal(toggled.ok, true);
   });
 });

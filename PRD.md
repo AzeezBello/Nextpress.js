@@ -159,33 +159,37 @@ Priority definitions:
 - **FR-053 (P1) [Implemented]:** Server validation enforces a strict MIME allowlist (`image/svg+xml`, `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `application/pdf`) and a 10 MB size cap.
 - **FR-054 (P2) [Planned]:** Automated image resizing and responsive `srcset` generation.
 
-### 7.7 Public rendering and SEO
+### 7.7 Public rendering and built-in SEO Suite (Rank Math + Yoast + AIOSEO)
 
 - **FR-060 (P0) [Implemented]:** Published pages render at `/s/[siteSlug]` and `/s/[siteSlug]/[slug]`; published posts render at `/s/[siteSlug]/blog/[slug]`.
 - **FR-061 (P0) [Implemented]:** Public layouts and navigation work responsively across mobile, tablet, and desktop viewports.
-- **FR-062 (P0) [Implemented]:** Per-item and site-default `metaTitle`, `metaDescription`, `canonicalUrl`, `noIndex`, and OpenGraph metadata are emitted via Next.js `generateMetadata`.
-- **FR-063 (P1) [Implemented]:** Dynamic `/sitemap.xml` (`src/app/sitemap.ts`) and `/robots.txt` (`src/app/robots.ts`) are generated from published site content.
+- **FR-062 (P0) [Implemented]:** Per-item and site-default `metaTitle`, `metaDescription`, `canonicalUrl`, `noIndex`, `noFollow`, `noArchive`, `noSnippet`, `maxImagePreview`, and OpenGraph/X metadata are emitted via Next.js `generateMetadata` with Smart Tag interpolation (`%%title%%`, `%%sep%%`, `%%sitename%%`, `%%tagline%%`, `%%excerpt%%`, `%%current_year%%`, `%%focuskw%%`).
+- **FR-063 (P1) [Implemented]:** Dynamic `/sitemap.xml` (`src/app/sitemap.ts`) and `/robots.txt` (`src/app/robots.ts`, including custom robots directives) are generated from published site content.
 - **FR-064 (P1) [Implemented]:** Public images render with `loading="lazy"`, aspect-ratio containers, and accessible `alt` attributes.
 - **FR-065 (P1) [Implemented]:** Next.js cache revalidation (`revalidatePath`) is tied to content save, publish, unpublish, delete, and site settings mutations.
-- **FR-066 (P2) [Planned]:** Public full-text search endpoint and 301/302 redirect manager.
+- **FR-066 (P1) [Implemented]:** Built-in **SEO Command Center (`/seo`)** and in-editor **TruSEO + Readability Intelligence (`src/lib/seo-engine.ts`)**, including:
+  - 0–100 TruSEO score and Yoast traffic-light Readability checks (15 automated checks across Basic SEO, Additional SEO, Title Readability, and Content Readability, plus Cornerstone Content strict mode).
+  - Unified Schema.org JSON-LD `@graph` (`Organization` / `LocalBusiness` / `Person`, `WebSite`, `BreadcrumbList`, `WebPage`, `Article` / `BlogPosting`, and automatic `FAQPage` extraction from `faq` blocks).
+  - Redirections Manager (`redirects` table) with automatic `301` redirect creation when a published slug changes, plus a 404 Monitor (`not_found_logs` table) with 1-click redirect promotion.
+  - Automated Internal Linking Suggestions inside the block editor.
 
-### 7.8 Visual website builder (Phase 4)
+### 7.8 Visual website builder & Appearance Studio (Phase 4)
 
 - **FR-070 (P1) [Implemented]:** The responsive preview canvas renders the exact same `ContentDocument` used by the block editor.
-- **FR-071 (P1) [Implemented]:** Users can add, select, reorder, duplicate, and configure registered blocks in the canvas/inspector.
+- **FR-071 (P1) [Implemented]:** Users can add, select, reorder, duplicate, and configure registered blocks (`heading`, `paragraph`, `image`, `button`, `divider`, `callout`, `columns`, `faq`) in the canvas/inspector.
 - **FR-072 (P1) [Implemented]:** Desktop, Tablet (`768px`), and Mobile (`390px`) preview modes are built into the editor.
-- **FR-073 (P1) [Implemented]:** Site-level `ThemeSettings` tokens control primary/accent/surface colors, heading typography, and border radius.
+- **FR-073 (P1) [Implemented]:** **Appearance Studio (`/appearance`)** provides WordPress-style visual theme presets, custom brand color pickers, typography pairings (`system`, `serif`, `mono`), border radius tokens, and a live preview canvas.
 - **FR-074 (P1) [Planned]:** Reusable section library and starter page templates.
 - **FR-075 (P1) [Implemented]:** Explicit keyboard-accessible Move Up / Move Down / Duplicate / Remove controls are provided on every block.
 - **FR-076 (P2) [Planned]:** Drag-and-drop visual canvas manipulation and theme-level header/footer template editing.
 
-### 7.9 Extensibility (Phase 5)
+### 7.9 Extensibility & Node Package Plugins (Phase 5)
 
 - **FR-080 (P2) [Planned]:** Custom content types and custom field schemas.
 - **FR-081 (P2) [Planned]:** Versioned REST/GraphQL APIs and outbound webhooks.
-- **FR-082 (P2) [Planned]:** Declarative extension manifest and permission boundaries.
+- **FR-082 (P1) [Implemented]:** **Node Package Plugin Manager (`/plugins`, `src/lib/plugins.ts`)** allowing Owners and Administrators to install, activate/deactivate, and configure npm/Node.js plugin packages (`@nextpress/plugin-*` and custom npm packages) per site with typed lifecycle hooks (`public:announcement_bar`, `content:before_article`, `content:after_article`, `seo:schema_graph`, `public:footer_badge`).
 - **FR-083 (P2) [Planned]:** JSON/Markdown site import and export cli/UI tools.
-- **FR-084 (P2) [Planned]:** Isolated plugin execution model.
+- **FR-084 (P1) [Implemented]:** Site-isolated plugin execution model persisted in `site_plugins`.
 
 ## 8. Non-functional requirements
 
@@ -217,6 +221,9 @@ Priority definitions:
 - **`content_taxonomies`:** `content_id`, `taxonomy_id`
 - **`media_assets`:** `id`, `site_id`, `filename`, `storage_key`, `url`, `mime_type`, `size_bytes`, `width`, `height`, `alt_text`, `caption`, `uploaded_by`, `created_at`
 - **`revisions`:** `id`, `content_id`, `site_id`, `version`, `title`, `slug`, `document_json`, `seo_json`, `note`, `author_id`, `created_at`
+- **`redirects`:** `id`, `site_id`, `source_path`, `destination_url`, `status_code`, `hits`, `notes`, `created_by`, `created_at`, `updated_at`
+- **`not_found_logs`:** `id`, `site_id`, `path`, `referrer`, `hits`, `last_seen_at`, `created_at`
+- **`site_plugins`:** `id`, `site_id`, `package_name`, `version`, `display_name`, `description`, `author`, `category`, `enabled`, `hooks_json`, `config_json`, `installed_by`, `installed_at`, `updated_at`
 - **`audit_logs`:** `id`, `site_id`, `actor_id`, `action`, `entity_type`, `entity_id`, `details_json`, `created_at`
 
 ## 10. Milestones and status

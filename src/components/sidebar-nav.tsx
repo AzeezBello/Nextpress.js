@@ -7,16 +7,22 @@ import {
   Image,
   Layers3,
   LayoutDashboard,
+  Palette,
+  Plug,
+  SearchCheck,
   Settings2
 } from "lucide-react";
 import type { SessionContext } from "@/lib/db";
 import { switchSiteAction } from "@/lib/actions";
 
 const items = [
-  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/pages", label: "Pages", icon: Files },
   { href: "/posts", label: "Posts", icon: BookOpenText },
-  { href: "/media", label: "Media library", icon: Image },
+  { href: "/media", label: "Media", icon: Image },
+  { href: "/appearance", label: "Appearance", icon: Palette },
+  { href: "/plugins", label: "Plugins", icon: Plug },
+  { href: "/seo", label: "SEO Suite", icon: SearchCheck },
   { href: "/settings", label: "Settings", icon: Settings2 }
 ];
 

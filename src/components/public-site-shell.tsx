@@ -2,6 +2,7 @@ import React from "react";
 import Link from "next/link";
 import { Layers3 } from "lucide-react";
 import type { ContentSummary, SiteRecord } from "@/lib/content-types";
+import { listSitePlugins } from "@/lib/db";
 
 export function PublicSiteShell({
   site,
@@ -16,6 +17,10 @@ export function PublicSiteShell({
   previewBanner?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const activePlugins = listSitePlugins(site.id).filter((p) => p.enabled);
+  const bannerPlugin = activePlugins.find((p) => p.hooks.includes("site:headerBanner"));
+  const footerBadgePlugin = activePlugins.find((p) => p.hooks.includes("site:footerBadge"));
+
   const fontClass =
     site.themeSettings.headingFont === "serif"
       ? "font-serif"
@@ -29,6 +34,23 @@ export function PublicSiteShell({
       style={{ backgroundColor: site.themeSettings.backgroundColor || "#F6F7F4" }}
     >
       {previewBanner}
+
+      {bannerPlugin ? (
+        <div
+          className="px-4 py-2 text-center text-xs font-medium text-white"
+          style={{ backgroundColor: site.themeSettings.primaryColor || "#176B4D" }}
+        >
+          <span>{String(bannerPlugin.config.bannerText || "Announcement")}</span>
+          {bannerPlugin.config.ctaLabel ? (
+            <Link
+              href={String(bannerPlugin.config.ctaHref || `/s/${site.slug}`)}
+              className="ml-3 rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-white/30"
+            >
+              {String(bannerPlugin.config.ctaLabel)} →
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
 
       <header className="border-b border-line bg-white/90 backdrop-blur-xs">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-5">
@@ -84,9 +106,16 @@ export function PublicSiteShell({
 
       <footer className="border-t border-line bg-white">
         <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-3 px-6 py-8 text-xs text-muted sm:flex-row">
-          <span>
-            © {new Date().getFullYear()} {site.name}. Powered by NextPress.js.
-          </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span>
+              © {new Date().getFullYear()} {site.name}. Powered by NextPress.js.
+            </span>
+            {footerBadgePlugin ? (
+              <span className="rounded-full bg-brand-soft px-2.5 py-0.5 text-[11px] font-semibold text-brand">
+                {String(footerBadgePlugin.config.badgeLabel || "CWV Passing")}
+              </span>
+            ) : null}
+          </div>
           <div className="flex items-center gap-4">
             <Link href={`/s/${site.slug}`} className="hover:text-ink">
               Home

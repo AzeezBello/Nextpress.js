@@ -13,6 +13,9 @@ import {
   type ContentStatus,
   type ContentSummary,
   type MediaAssetRecord,
+  type NotFoundLogRecord,
+  type RedirectRecord,
+  type RedirectStatusCode,
   type RevisionRecord,
   type SeoMetadata,
   type SiteRecord,
@@ -21,6 +24,13 @@ import {
   type ThemeSettings
 } from "@/lib/content-types";
 import { canEditContent, hasPermission } from "@/lib/permissions";
+import { analyzeSeoAndReadability } from "@/lib/seo-engine";
+import {
+  isValidNpmPackageName,
+  OFFICIAL_NODE_PLUGIN_PACKAGES,
+  type PluginHookName,
+  type SitePluginRecord
+} from "@/lib/plugins";
 
 export type UserRecord = {
   id: string;
@@ -269,13 +279,209 @@ function runMigrations(db: DatabaseSync): void {
       "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)"
     ).run(1, "001_initial_cms_core", new Date().toISOString());
   }
+
+  const appliedV2 = db
+    .prepare("SELECT version FROM schema_migrations WHERE version = 2")
+    .get() as { version: number } | undefined;
+
+  if (!appliedV2) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS redirects (
+        id TEXT PRIMARY KEY,
+        site_id TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        destination_url TEXT NOT NULL,
+        status_code INTEGER NOT NULL DEFAULT 301,
+        is_regex INTEGER NOT NULL DEFAULT 0,
+        hits INTEGER NOT NULL DEFAULT 0,
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(site_id, source_path),
+        FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_redirects_site_source
+        ON redirects(site_id, source_path);
+
+      CREATE TABLE IF NOT EXISTS not_found_logs (
+        id TEXT PRIMARY KEY,
+        site_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        referrer TEXT NOT NULL DEFAULT '',
+        hits INTEGER NOT NULL DEFAULT 1,
+        last_seen_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(site_id, path),
+        FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_not_found_site_hits
+        ON not_found_logs(site_id, hits DESC);
+    `);
+
+    db.prepare(
+      "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)"
+    ).run(2, "002_seo_redirects_404_monitor", new Date().toISOString());
+  }
+
+  const appliedV3 = db
+    .prepare("SELECT version FROM schema_migrations WHERE version = 3")
+    .get() as { version: number } | undefined;
+
+  if (!appliedV3) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS site_plugins (
+        id TEXT PRIMARY KEY,
+        site_id TEXT NOT NULL,
+        package_name TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        version TEXT NOT NULL DEFAULT '1.0.0',
+        description TEXT NOT NULL DEFAULT '',
+        author TEXT NOT NULL DEFAULT 'Community',
+        hooks_json TEXT NOT NULL DEFAULT '[]',
+        enabled INTEGER NOT NULL DEFAULT 0,
+        config_json TEXT NOT NULL DEFAULT '{}',
+        installed_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(site_id, package_name),
+        FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_site_plugins_site
+        ON site_plugins(site_id, enabled);
+    `);
+
+    db.prepare(
+      "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)"
+    ).run(3, "003_site_node_plugins", new Date().toISOString());
+  }
+}
+
+function seedSeoTablesIfNeeded(db: DatabaseSync, now: string): void {
+  const flagExists = db
+    .prepare("SELECT id FROM sites WHERE id = 'site_flagship'")
+    .get() as { id: string } | undefined;
+  if (!flagExists) return;
+
+  const redCount = db.prepare("SELECT COUNT(*) as cnt FROM redirects").get() as { cnt: number };
+  if (redCount.cnt === 0) {
+    const insertRedirect = db.prepare(`
+      INSERT OR IGNORE INTO redirects (
+        id, site_id, source_path, destination_url, status_code, is_regex, hits, note, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insertRedirect.run(
+      "red_legacy_docs",
+      "site_flagship",
+      "/s/flagship/docs",
+      "/s/flagship/about",
+      301,
+      0,
+      18,
+      "Legacy documentation path redirected to About page",
+      now,
+      now
+    );
+
+    insertRedirect.run(
+      "red_old_launch",
+      "site_flagship",
+      "/s/flagship/blog/block-schema-v0",
+      "/s/flagship/blog/introducing-the-block-registry",
+      301,
+      0,
+      9,
+      "Auto-created 301 redirect from earlier slug change",
+      now,
+      now
+    );
+
+    const insert404 = db.prepare(`
+      INSERT OR IGNORE INTO not_found_logs (
+        id, site_id, path, referrer, hits, last_seen_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insert404.run(
+      "nf_pricing_old",
+      "site_flagship",
+      "/s/flagship/pricing-2025",
+      "https://news.ycombinator.com",
+      14,
+      now,
+      now
+    );
+
+    insert404.run(
+      "nf_wp_admin",
+      "site_flagship",
+      "/s/flagship/wp-login.php",
+      "Direct / Bot Probe",
+      6,
+      now,
+      now
+    );
+  }
+
+  const pluginCount = db
+    .prepare("SELECT COUNT(*) as cnt FROM site_plugins")
+    .get() as { cnt: number };
+  if (pluginCount.cnt === 0) {
+    const insertPlugin = db.prepare(`
+      INSERT OR IGNORE INTO site_plugins (
+        id, site_id, package_name, display_name, version, description, author,
+        hooks_json, enabled, config_json, installed_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const pkg of OFFICIAL_NODE_PLUGIN_PACKAGES) {
+      const enabledByDefault =
+        pkg.packageName === "@nextpress/plugin-reading-time" ||
+        pkg.packageName === "@nextpress/plugin-prism-syntax"
+          ? 1
+          : 0;
+      insertPlugin.run(
+        generateId("plg"),
+        "site_flagship",
+        pkg.packageName,
+        pkg.displayName,
+        pkg.version,
+        pkg.description,
+        pkg.author,
+        JSON.stringify(pkg.hooks),
+        enabledByDefault,
+        JSON.stringify(pkg.defaultConfig),
+        now,
+        now
+      );
+      insertPlugin.run(
+        generateId("plg"),
+        "site_northwind",
+        pkg.packageName,
+        pkg.displayName,
+        pkg.version,
+        pkg.description,
+        pkg.author,
+        JSON.stringify(pkg.hooks),
+        enabledByDefault,
+        JSON.stringify(pkg.defaultConfig),
+        now,
+        now
+      );
+    }
+  }
 }
 
 function seedDatabaseIfNeeded(db: DatabaseSync): void {
-  const row = db.prepare("SELECT COUNT(*) as cnt FROM users").get() as { cnt: number };
-  if (row.cnt > 0) return;
-
   const now = new Date().toISOString();
+  const row = db.prepare("SELECT COUNT(*) as cnt FROM users").get() as { cnt: number };
+  if (row.cnt > 0) {
+    seedSeoTablesIfNeeded(db, now);
+    return;
+  }
+
   const defaultPasswordHash = hashPassword("nextpress123");
 
   // 1. Seed Users (Owner, Admin, Editor, Author)
@@ -326,8 +532,22 @@ function seedDatabaseIfNeeded(db: DatabaseSync): void {
       metaTitle: "NextPress Flagship",
       metaDescription: "Modern structured publishing and visual site building with Next.js.",
       canonicalUrl: "http://localhost:3000/s/flagship",
-      noIndex: false
-    }),
+      noIndex: false,
+      titleSeparator: "—",
+      titleTemplatePage: "%%title%% %%sep%% %%sitename%%",
+      titleTemplatePost: "%%title%% %%sep%% %%sitename%%",
+      knowledgeGraphType: "Organization",
+      organizationName: "NextPress Labs Inc.",
+      organizationLogo: "/nextpress-mark.svg",
+      localBusinessCategory: "SoftwareCompany",
+      phone: "+1-415-555-0192",
+      streetAddress: "548 Market St",
+      addressLocality: "San Francisco, CA",
+      postalCode: "94104",
+      addressCountry: "US",
+      openingHours: "Mo-Fr 09:00-18:00",
+      socialProfiles: ["https://github.com/nextpress", "https://x.com/nextpress"]
+    } satisfies SeoMetadata),
     now,
     now
   );
@@ -469,6 +689,27 @@ function seedDatabaseIfNeeded(db: DatabaseSync): void {
           title: "Live from SQLite persistence",
           text: "This page is rendered dynamically from the NextPress.js block registry. Edit its blocks in the dashboard and republish to see instant updates.",
           tone: "brand"
+        }
+      },
+      {
+        id: "blk_home_faq",
+        type: "faq",
+        version: 1,
+        props: {
+          heading: "Frequently Asked Questions about NextPress.js",
+          exclusive: true,
+          items: [
+            {
+              question: "Does NextPress.js include Rank Math, Yoast, and AIOSEO features by default?",
+              answer:
+                "Yes. NextPress.js ships with TruSEO 0–100 scoring, Yoast Readability analysis, Cornerstone content workflows, Smart Tag variables, Schema.org @graph JSON-LD, 301 Redirect Manager, and a built-in 404 Monitor out of the box."
+            },
+            {
+              question: "How does the FAQ block improve Google Search visibility?",
+              answer:
+                "Every FAQ block renders semantic HTML <details> disclosure elements and automatically injects Schema.org FAQPage structured data into the page's JSON-LD @graph."
+            }
+          ]
         }
       }
     ]
@@ -630,11 +871,20 @@ function seedDatabaseIfNeeded(db: DatabaseSync): void {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  // Page 1: Published Home
+  // Page 1: Published Home (Cornerstone)
   const homeSeo: SeoMetadata = {
-    metaTitle: "Welcome to NextPress.js — Modern Block CMS",
-    metaDescription: "Create, preview, and publish structured pages with NextPress.js.",
+    metaTitle: "Welcome to NextPress.js — Ultimate Block Registry CMS (2026)",
+    metaDescription:
+      "NextPress.js combines a validated block registry with built-in Rank Math, Yoast SEO, and AIOSEO intelligence so teams publish with confidence.",
     canonicalUrl: "http://localhost:3000/s/flagship/home",
+    focusKeyword: "block registry",
+    secondaryKeywords: ["nextpress", "structured publishing", "schema"],
+    isCornerstone: true,
+    schemaType: "WebPage",
+    ogTitle: "NextPress.js — Modern Block Registry CMS",
+    ogDescription: "Structured publishing, TruSEO scoring, and Schema.org @graph built in by default.",
+    ogImage: "/nextpress-mark.svg",
+    twitterCard: "summary_large_image",
     noIndex: false
   };
   insertContent.run(
@@ -667,11 +917,16 @@ function seedDatabaseIfNeeded(db: DatabaseSync): void {
     now
   );
 
-  // Page 2: Published About
+  // Page 2: Published About (Cornerstone)
   const aboutSeo: SeoMetadata = {
-    metaTitle: "About NextPress.js",
-    metaDescription: "Learn how NextPress.js combines structured content and visual building.",
+    metaTitle: "About NextPress.js — Essential Architecture Guide (2026)",
+    metaDescription:
+      "Learn how NextPress.js combines structured content, versioned blocks, and visual building in Next.js without plugin bloat.",
     canonicalUrl: "http://localhost:3000/s/flagship/about",
+    focusKeyword: "nextpress.js",
+    secondaryKeywords: ["blocks", "cms", "visual page builders"],
+    isCornerstone: true,
+    schemaType: "WebPage",
     noIndex: false
   };
   insertContent.run(
@@ -707,7 +962,9 @@ function seedDatabaseIfNeeded(db: DatabaseSync): void {
   // Page 3: Draft Roadmap
   const roadmapSeo: SeoMetadata = {
     metaTitle: "2026 Product Roadmap (Draft)",
-    metaDescription: "Upcoming visual builder and extensibility milestones.",
+    metaDescription: "Upcoming visual builder and extensibility milestones for NextPress Flagship.",
+    focusKeyword: "visual builder",
+    schemaType: "WebPage",
     noIndex: true
   };
   insertContent.run(
@@ -740,10 +997,15 @@ function seedDatabaseIfNeeded(db: DatabaseSync): void {
     now
   );
 
-  // Post 1: Published Post
+  // Post 1: Published Post (Cornerstone)
   const post1Seo: SeoMetadata = {
-    metaTitle: "Introducing the NextPress Block Registry",
-    metaDescription: "How validated block schemas protect public rendering.",
+    metaTitle: "Introducing the NextPress Block Registry — Complete Guide (2026)",
+    metaDescription:
+      "Discover how the NextPress block registry uses runtime validators and server-safe React renderers to protect public rendering.",
+    focusKeyword: "block registry",
+    secondaryKeywords: ["runtime validator", "react renderer"],
+    isCornerstone: true,
+    schemaType: "BlogPosting",
     noIndex: false
   };
   insertContent.run(
@@ -778,8 +1040,11 @@ function seedDatabaseIfNeeded(db: DatabaseSync): void {
 
   // Post 2: Draft Post by Author
   const post2Seo: SeoMetadata = {
-    metaTitle: "Designing for Editorial Calm",
-    metaDescription: "Notes on revision safety and role guardrails.",
+    metaTitle: "Designing for Editorial Calm — Proven Workflow Guide",
+    metaDescription:
+      "Notes on revision safety, editorial calm, and role guardrails so authors write freely while editors control what goes live.",
+    focusKeyword: "editorial calm",
+    schemaType: "Article",
     noIndex: false
   };
   insertContent.run(
@@ -838,6 +1103,8 @@ function seedDatabaseIfNeeded(db: DatabaseSync): void {
   insertContentTax.run("cnt_post_registry", "tax_tag_blocks");
   insertContentTax.run("cnt_post_calm", "tax_prod");
   insertContentTax.run("cnt_post_calm", "tax_tag_cms");
+
+  seedSeoTablesIfNeeded(db, now);
 }
 
 function mapSiteRow(row: Record<string, unknown>): SiteRecord {
@@ -1137,9 +1404,11 @@ export function listContentItems(
     params.push(q, q);
   }
 
+  const site = getSiteById(siteId);
   const rows = db
     .prepare(
       `SELECT c.id, c.site_id, c.kind, c.title, c.slug, c.excerpt, c.status,
+              c.document_json, c.seo_json,
               c.author_id, u.name as author_name, c.published_at, c.updated_at, c.created_at
        FROM content_items c
        JOIN users u ON u.id = c.author_id
@@ -1148,20 +1417,40 @@ export function listContentItems(
     )
     .all(...params) as Record<string, unknown>[];
 
-  return rows.map((r) => ({
-    id: String(r.id),
-    siteId: String(r.site_id),
-    kind: r.kind as ContentKind,
-    title: String(r.title),
-    slug: String(r.slug),
-    excerpt: String(r.excerpt ?? ""),
-    status: r.status as ContentStatus,
-    authorId: String(r.author_id),
-    authorName: String(r.author_name),
-    publishedAt: r.published_at ? String(r.published_at) : null,
-    updatedAt: String(r.updated_at),
-    createdAt: String(r.created_at)
-  }));
+  return rows.map((r) => {
+    const seo = validateSeoMetadata(JSON.parse(String(r.seo_json || "{}")));
+    const doc = validateAndMigrateDocument(
+      JSON.parse(String(r.document_json || '{"schemaVersion":1,"blocks":[]}'))
+    ).document;
+    const analysis = analyzeSeoAndReadability({
+      title: String(r.title),
+      slug: String(r.slug),
+      excerpt: String(r.excerpt ?? ""),
+      kind: r.kind as ContentKind,
+      document: doc,
+      seo,
+      siteName: site?.name ?? "NextPress",
+      siteTagline: site?.tagline ?? ""
+    });
+
+    return {
+      id: String(r.id),
+      siteId: String(r.site_id),
+      kind: r.kind as ContentKind,
+      title: String(r.title),
+      slug: String(r.slug),
+      excerpt: String(r.excerpt ?? ""),
+      status: r.status as ContentStatus,
+      authorId: String(r.author_id),
+      authorName: String(r.author_name),
+      publishedAt: r.published_at ? String(r.published_at) : null,
+      updatedAt: String(r.updated_at),
+      createdAt: String(r.created_at),
+      focusKeyword: seo.focusKeyword,
+      isCornerstone: Boolean(seo.isCornerstone),
+      seoScore: analysis.overallScore
+    };
+  });
 }
 
 export function getContentItemById(siteId: string, contentId: string): ContentItemRecord | null {
@@ -1439,6 +1728,40 @@ export function updateContentItem(input: {
     entityId: existing.id,
     details: { title, slug, version: nextVersion }
   });
+
+  // Rank Math / Yoast Auto-Redirect: If a published item's slug changed, automatically create a 301 redirect
+  if (existing.status === "published" && existing.slug !== slug) {
+    const site = getSiteById(input.siteId);
+    if (site) {
+      const oldPath =
+        existing.kind === "post"
+          ? `/s/${site.slug}/blog/${existing.slug}`
+          : `/s/${site.slug}/${existing.slug}`;
+      const newPath =
+        existing.kind === "post"
+          ? `/s/${site.slug}/blog/${slug}`
+          : `/s/${site.slug}/${slug}`;
+
+      db.prepare(
+        `INSERT INTO redirects (
+          id, site_id, source_path, destination_url, status_code, is_regex, hits, note, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 301, 0, 0, ?, ?, ?)
+        ON CONFLICT(site_id, source_path) DO UPDATE SET
+          destination_url = excluded.destination_url,
+          status_code = 301,
+          note = excluded.note,
+          updated_at = excluded.updated_at`
+      ).run(
+        generateId("red"),
+        input.siteId,
+        oldPath,
+        newPath,
+        `Auto-created 301 redirect when "${title}" slug changed from "${existing.slug}" to "${slug}"`,
+        now,
+        now
+      );
+    }
+  }
 
   return { ok: true, item: getContentItemById(input.siteId, existing.id)! };
 }
@@ -1853,4 +2176,436 @@ export function listAuditLogs(siteId: string, limit = 15): AuditLogRecord[] {
     details: JSON.parse(String(r.details_json || "{}")),
     createdAt: String(r.created_at)
   }));
+}
+
+export function listRedirects(siteId: string): RedirectRecord[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT * FROM redirects
+       WHERE site_id = ?
+       ORDER BY updated_at DESC`
+    )
+    .all(siteId) as Record<string, unknown>[];
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    siteId: String(r.site_id),
+    sourcePath: String(r.source_path),
+    destinationUrl: String(r.destination_url),
+    statusCode: Number(r.status_code) as RedirectStatusCode,
+    isRegex: Boolean(r.is_regex),
+    hits: Number(r.hits ?? 0),
+    note: String(r.note ?? ""),
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at)
+  }));
+}
+
+export function createRedirect(input: {
+  siteId: string;
+  actorId: string;
+  sourcePath: string;
+  destinationUrl: string;
+  statusCode?: RedirectStatusCode;
+  isRegex?: boolean;
+  note?: string;
+}): { ok: true; redirect: RedirectRecord } | { ok: false; error: string } {
+  const db = getDb();
+  const role = getUserRoleForSite(input.actorId, input.siteId);
+  if (!hasPermission(role, "content:publish")) {
+    return {
+      ok: false,
+      error: "Forbidden: only Editors, Administrators, and Owners can manage redirects."
+    };
+  }
+
+  let sourcePath = input.sourcePath.trim();
+  if (!sourcePath) {
+    return { ok: false, error: "Source path is required." };
+  }
+  if (!input.isRegex && !sourcePath.startsWith("/")) {
+    sourcePath = `/${sourcePath}`;
+  }
+
+  const statusCode: RedirectStatusCode = [301, 302, 307, 410, 451].includes(
+    Number(input.statusCode)
+  )
+    ? (Number(input.statusCode) as RedirectStatusCode)
+    : 301;
+
+  const destinationUrl =
+    statusCode === 410 || statusCode === 451 ? "" : input.destinationUrl.trim();
+  if (statusCode !== 410 && statusCode !== 451 && !destinationUrl) {
+    return { ok: false, error: "Destination URL is required for 301/302/307 redirects." };
+  }
+  if (destinationUrl && destinationUrl === sourcePath) {
+    return { ok: false, error: "Source path and destination URL cannot be identical." };
+  }
+
+  const id = generateId("red");
+  const now = new Date().toISOString();
+
+  db.prepare(
+    `INSERT INTO redirects (
+      id, site_id, source_path, destination_url, status_code, is_regex, hits, note, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+    ON CONFLICT(site_id, source_path) DO UPDATE SET
+      destination_url = excluded.destination_url,
+      status_code = excluded.status_code,
+      is_regex = excluded.is_regex,
+      note = excluded.note,
+      updated_at = excluded.updated_at`
+  ).run(
+    id,
+    input.siteId,
+    sourcePath,
+    destinationUrl,
+    statusCode,
+    input.isRegex ? 1 : 0,
+    (input.note ?? "").trim().slice(0, 240),
+    now,
+    now
+  );
+
+  // If this path was in 404 logs, remove it so the resolved 404 queue stays clean
+  db.prepare("DELETE FROM not_found_logs WHERE site_id = ? AND path = ?").run(
+    input.siteId,
+    sourcePath
+  );
+
+  recordAuditLog({
+    siteId: input.siteId,
+    actorId: input.actorId,
+    action: "seo.redirect.upsert",
+    entityType: "redirect",
+    entityId: id,
+    details: { sourcePath, destinationUrl, statusCode }
+  });
+
+  const all = listRedirects(input.siteId);
+  const saved = all.find((r) => r.sourcePath === sourcePath) ?? all[0]!;
+  return { ok: true, redirect: saved };
+}
+
+export function deleteRedirect(input: {
+  siteId: string;
+  redirectId: string;
+  actorId: string;
+}): { ok: true } | { ok: false; error: string } {
+  const db = getDb();
+  const role = getUserRoleForSite(input.actorId, input.siteId);
+  if (!hasPermission(role, "content:publish")) {
+    return { ok: false, error: "Forbidden: your role cannot delete redirects." };
+  }
+
+  db.prepare("DELETE FROM redirects WHERE id = ? AND site_id = ?").run(
+    input.redirectId,
+    input.siteId
+  );
+  return { ok: true };
+}
+
+export function matchRedirectForPath(
+  siteId: string,
+  requestPath: string
+): { redirect: RedirectRecord; resolvedDestination: string } | null {
+  const db = getDb();
+  const cleanPath = requestPath.trim() || "/";
+  const redirects = listRedirects(siteId);
+
+  for (const r of redirects) {
+    if (!r.isRegex) {
+      if (r.sourcePath.toLowerCase() === cleanPath.toLowerCase()) {
+        db.prepare("UPDATE redirects SET hits = hits + 1 WHERE id = ?").run(r.id);
+        return {
+          redirect: { ...r, hits: r.hits + 1 },
+          resolvedDestination: r.destinationUrl
+        };
+      }
+    } else {
+      try {
+        const re = new RegExp(r.sourcePath, "i");
+        if (re.test(cleanPath)) {
+          const resolved = cleanPath.replace(re, r.destinationUrl);
+          db.prepare("UPDATE redirects SET hits = hits + 1 WHERE id = ?").run(r.id);
+          return {
+            redirect: { ...r, hits: r.hits + 1 },
+            resolvedDestination: resolved
+          };
+        }
+      } catch {
+        // Ignore malformed regex
+      }
+    }
+  }
+  return null;
+}
+
+export function logNotFoundHit(input: {
+  siteId: string;
+  path: string;
+  referrer?: string;
+}): void {
+  const db = getDb();
+  const cleanPath = input.path.trim().slice(0, 300) || "/";
+  const now = new Date().toISOString();
+  const id = generateId("nf");
+
+  db.prepare(
+    `INSERT INTO not_found_logs (
+      id, site_id, path, referrer, hits, last_seen_at, created_at
+    ) VALUES (?, ?, ?, ?, 1, ?, ?)
+    ON CONFLICT(site_id, path) DO UPDATE SET
+      hits = not_found_logs.hits + 1,
+      referrer = CASE WHEN excluded.referrer != '' THEN excluded.referrer ELSE not_found_logs.referrer END,
+      last_seen_at = excluded.last_seen_at`
+  ).run(id, input.siteId, cleanPath, (input.referrer ?? "").trim().slice(0, 300), now, now);
+}
+
+export function listNotFoundLogs(siteId: string): NotFoundLogRecord[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT * FROM not_found_logs
+       WHERE site_id = ?
+       ORDER BY hits DESC, last_seen_at DESC`
+    )
+    .all(siteId) as Record<string, unknown>[];
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    siteId: String(r.site_id),
+    path: String(r.path),
+    referrer: String(r.referrer ?? ""),
+    hits: Number(r.hits ?? 1),
+    lastSeenAt: String(r.last_seen_at),
+    createdAt: String(r.created_at)
+  }));
+}
+
+export function clearNotFoundLogs(input: {
+  siteId: string;
+  actorId: string;
+  logId?: string;
+}): { ok: true } | { ok: false; error: string } {
+  const db = getDb();
+  const role = getUserRoleForSite(input.actorId, input.siteId);
+  if (!hasPermission(role, "content:publish")) {
+    return { ok: false, error: "Forbidden: your role cannot clear 404 monitor logs." };
+  }
+
+  if (input.logId) {
+    db.prepare("DELETE FROM not_found_logs WHERE id = ? AND site_id = ?").run(
+      input.logId,
+      input.siteId
+    );
+  } else {
+    db.prepare("DELETE FROM not_found_logs WHERE site_id = ?").run(input.siteId);
+  }
+  return { ok: true };
+}
+
+export function listSitePlugins(siteId: string): SitePluginRecord[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT * FROM site_plugins
+       WHERE site_id = ?
+       ORDER BY installed_at ASC`
+    )
+    .all(siteId) as Record<string, unknown>[];
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    siteId: String(r.site_id),
+    packageName: String(r.package_name),
+    displayName: String(r.display_name),
+    version: String(r.version),
+    description: String(r.description ?? ""),
+    author: String(r.author ?? "Community"),
+    hooks: JSON.parse(String(r.hooks_json || "[]")) as PluginHookName[],
+    enabled: Boolean(r.enabled),
+    config: JSON.parse(String(r.config_json || "{}")) as Record<string, string | boolean | number>,
+    installedAt: String(r.installed_at),
+    updatedAt: String(r.updated_at)
+  }));
+}
+
+export function installNodePluginPackage(input: {
+  siteId: string;
+  actorId: string;
+  packageName: string;
+  displayName?: string;
+  version?: string;
+  description?: string;
+  author?: string;
+  hooks?: PluginHookName[];
+}): { ok: true; plugin: SitePluginRecord } | { ok: false; error: string } {
+  const db = getDb();
+  const role = getUserRoleForSite(input.actorId, input.siteId);
+  if (!hasPermission(role, "site:manage")) {
+    return {
+      ok: false,
+      error: "Forbidden: only Site Owners and Administrators can install Node package plugins."
+    };
+  }
+
+  const pkgName = input.packageName.trim().toLowerCase();
+  if (!isValidNpmPackageName(pkgName)) {
+    return {
+      ok: false,
+      error:
+        "Invalid npm package name. Use a scoped or standard Node package name (e.g., @nextpress/plugin-newsletter or nextpress-plugin-analytics)."
+    };
+  }
+
+  const official = OFFICIAL_NODE_PLUGIN_PACKAGES.find((p) => p.packageName === pkgName);
+  const displayName =
+    input.displayName?.trim() ||
+    official?.displayName ||
+    pkgName
+      .replace(/^@[^/]+\//, "")
+      .replace(/^nextpress-plugin-|^plugin-/, "")
+      .split("-")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+
+  const version = input.version?.trim() || official?.version || "1.0.0";
+  const description =
+    input.description?.trim() ||
+    official?.description ||
+    `Node package extension (${pkgName}) registered in the NextPress plugin runtime.`;
+  const author = input.author?.trim() || official?.author || "npm Registry Package";
+  const hooks: PluginHookName[] =
+    input.hooks && input.hooks.length > 0
+      ? input.hooks
+      : official?.hooks || ["seo:extendSchema"];
+  const defaultConfig = official?.defaultConfig || { enabledInProduction: true };
+  const now = new Date().toISOString();
+  const id = generateId("plg");
+
+  db.prepare(
+    `INSERT INTO site_plugins (
+      id, site_id, package_name, display_name, version, description, author,
+      hooks_json, enabled, config_json, installed_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+    ON CONFLICT(site_id, package_name) DO UPDATE SET
+      display_name = excluded.display_name,
+      version = excluded.version,
+      description = excluded.description,
+      author = excluded.author,
+      enabled = 1,
+      updated_at = excluded.updated_at`
+  ).run(
+    id,
+    input.siteId,
+    pkgName,
+    displayName.slice(0, 100),
+    version.slice(0, 32),
+    description.slice(0, 300),
+    author.slice(0, 80),
+    JSON.stringify(hooks),
+    JSON.stringify(defaultConfig),
+    now,
+    now
+  );
+
+  recordAuditLog({
+    siteId: input.siteId,
+    actorId: input.actorId,
+    action: "plugin.install",
+    entityType: "plugin",
+    entityId: pkgName,
+    details: { packageName: pkgName, version }
+  });
+
+  const all = listSitePlugins(input.siteId);
+  return { ok: true, plugin: all.find((p) => p.packageName === pkgName) ?? all[0]! };
+}
+
+export function toggleSitePlugin(input: {
+  siteId: string;
+  actorId: string;
+  pluginId: string;
+  enabled: boolean;
+}): { ok: true } | { ok: false; error: string } {
+  const db = getDb();
+  const role = getUserRoleForSite(input.actorId, input.siteId);
+  if (!hasPermission(role, "site:manage")) {
+    return {
+      ok: false,
+      error: "Forbidden: only Site Owners and Administrators can activate or deactivate plugins."
+    };
+  }
+
+  db.prepare(
+    `UPDATE site_plugins
+     SET enabled = ?, updated_at = ?
+     WHERE id = ? AND site_id = ?`
+  ).run(input.enabled ? 1 : 0, new Date().toISOString(), input.pluginId, input.siteId);
+
+  recordAuditLog({
+    siteId: input.siteId,
+    actorId: input.actorId,
+    action: input.enabled ? "plugin.activate" : "plugin.deactivate",
+    entityType: "plugin",
+    entityId: input.pluginId
+  });
+
+  return { ok: true };
+}
+
+export function updateSitePluginConfig(input: {
+  siteId: string;
+  actorId: string;
+  pluginId: string;
+  config: Record<string, string | boolean | number>;
+}): { ok: true } | { ok: false; error: string } {
+  const db = getDb();
+  const role = getUserRoleForSite(input.actorId, input.siteId);
+  if (!hasPermission(role, "site:manage")) {
+    return {
+      ok: false,
+      error: "Forbidden: only Site Owners and Administrators can configure plugins."
+    };
+  }
+
+  db.prepare(
+    `UPDATE site_plugins
+     SET config_json = ?, updated_at = ?
+     WHERE id = ? AND site_id = ?`
+  ).run(JSON.stringify(input.config), new Date().toISOString(), input.pluginId, input.siteId);
+
+  return { ok: true };
+}
+
+export function uninstallSitePlugin(input: {
+  siteId: string;
+  actorId: string;
+  pluginId: string;
+}): { ok: true } | { ok: false; error: string } {
+  const db = getDb();
+  const role = getUserRoleForSite(input.actorId, input.siteId);
+  if (!hasPermission(role, "site:manage")) {
+    return {
+      ok: false,
+      error: "Forbidden: only Site Owners and Administrators can remove Node package plugins."
+    };
+  }
+
+  db.prepare("DELETE FROM site_plugins WHERE id = ? AND site_id = ?").run(
+    input.pluginId,
+    input.siteId
+  );
+
+  recordAuditLog({
+    siteId: input.siteId,
+    actorId: input.actorId,
+    action: "plugin.uninstall",
+    entityType: "plugin",
+    entityId: input.pluginId
+  });
+
+  return { ok: true };
 }

@@ -4,6 +4,7 @@ import { BlockEditor } from "@/components/block-editor";
 import { requireSession } from "@/lib/auth";
 import {
   getContentItemById,
+  listContentItems,
   listMediaAssets,
   listRevisions,
   listTaxonomies
@@ -27,6 +28,7 @@ export default async function EditPostRoute({
   const revisions = listRevisions(session.activeSite.id, item.id);
   const mediaAssets = listMediaAssets(session.activeSite.id);
   const taxonomies = listTaxonomies(session.activeSite.id);
+  const allSiteItems = listContentItems(session.activeSite.id);
 
   return (
     <DashboardShell
@@ -37,6 +39,8 @@ export default async function EditPostRoute({
       <BlockEditor
         item={item}
         siteSlug={session.activeSite.slug}
+        site={session.activeSite}
+        allSiteItems={allSiteItems}
         userRole={session.role}
         canEdit={canEdit}
         revisions={revisions}

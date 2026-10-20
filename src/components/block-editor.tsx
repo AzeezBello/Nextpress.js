@@ -4,41 +4,58 @@ import React, { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  AlertCircle,
+  AlertTriangle,
   ArrowDown,
   ArrowLeft,
   ArrowUp,
   CheckCircle2,
+  Code2,
   Copy,
   ExternalLink,
   Eye,
   Globe,
   History,
   Laptop,
+  Link2,
   Plus,
   RotateCcw,
   Save,
   Search,
+  Share2,
   Smartphone,
   Sparkles,
+  Star,
   Tablet,
   Trash2
 } from "lucide-react";
 import {
   BLOCK_CATALOG,
   REGISTERED_BLOCK_TYPES,
+  SCHEMA_ENTITY_TYPES,
   createDefaultBlock,
   normalizeSlug,
   type BlockType,
   type ColumnsBlockItem,
   type ContentBlock,
   type ContentItemRecord,
+  type ContentSummary,
+  type FaqBlockItem,
   type MediaAssetRecord,
   type RevisionRecord,
+  type SchemaEntityType,
   type SeoMetadata,
+  type SiteRecord,
   type SiteRole,
   type TaxonomyRecord
 } from "@/lib/content-types";
 import { hasPermission } from "@/lib/permissions";
+import {
+  SMART_TAGS,
+  analyzeSeoAndReadability,
+  buildSchemaGraph,
+  suggestInternalLinks
+} from "@/lib/seo-engine";
 import {
   restoreRevisionAction,
   saveContentDocumentAction,
@@ -52,6 +69,8 @@ type ViewportSize = "desktop" | "tablet" | "mobile";
 export function BlockEditor({
   item,
   siteSlug,
+  site,
+  allSiteItems = [],
   userRole,
   canEdit,
   revisions,
@@ -60,6 +79,8 @@ export function BlockEditor({
 }: {
   item: ContentItemRecord;
   siteSlug: string;
+  site?: SiteRecord;
+  allSiteItems?: ContentSummary[];
   userRole: SiteRole;
   canEdit: boolean;
   revisions: RevisionRecord[];
@@ -77,11 +98,16 @@ export function BlockEditor({
     item.document.blocks[0]?.id ?? null
   );
   const [seo, setSeo] = useState<SeoMetadata>(item.seo);
+  const [secondaryKeywordsInput, setSecondaryKeywordsInput] = useState(
+    (item.seo.secondaryKeywords ?? []).join(", ")
+  );
   const [selectedTaxonomies, setSelectedTaxonomies] = useState<string[]>(item.taxonomyIds);
   const [revisionNote, setRevisionNote] = useState("");
 
   const [activeTab, setActiveTab] = useState<EditorTab>("blocks");
   const [viewport, setViewport] = useState<ViewportSize>("desktop");
+  const [serpDevice, setSerpDevice] = useState<"desktop" | "mobile">("desktop");
+  const [showSchemaJson, setShowSchemaJson] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
     null
@@ -92,6 +118,68 @@ export function BlockEditor({
     item.kind === "page"
       ? `/s/${siteSlug}/${slug}`
       : `/s/${siteSlug}/blog/${slug}`;
+
+  const currentDocument = {
+    schemaVersion: item.document.schemaVersion,
+    blocks
+  };
+
+  // Live Rank Math + Yoast + AIOSEO Analysis
+  const seoReport = analyzeSeoAndReadability({
+    title,
+    slug,
+    excerpt,
+    kind: item.kind,
+    document: currentDocument,
+    seo,
+    siteName: site?.name ?? "NextPress Flagship",
+    siteTagline: site?.tagline ?? "",
+    siteSeoDefaults: site?.seoDefaults,
+    authorName: item.authorName
+  });
+
+  // Live Internal Linking Suggestions (prioritizing Cornerstone content)
+  const internalLinkSuggestions = suggestInternalLinks({
+    currentItemId: item.id,
+    siteSlug,
+    document: currentDocument,
+    candidates: allSiteItems
+  });
+
+  // Live Schema.org @graph preview
+  const effectiveSite: SiteRecord = site ?? {
+    id: item.siteId,
+    name: "NextPress Flagship",
+    slug: siteSlug,
+    domain: "nextpress.local",
+    tagline: "",
+    description: "",
+    ownerId: item.authorId,
+    themeSettings: {
+      primaryColor: "#176B4D",
+      accentColor: "#8A5A20",
+      backgroundColor: "#F6F7F4",
+      headingFont: "system",
+      bodyFont: "system",
+      borderRadius: "rounded"
+    },
+    seoDefaults: {},
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt
+  };
+
+  const schemaGraph = buildSchemaGraph({
+    site: effectiveSite,
+    item: {
+      ...item,
+      title,
+      slug,
+      excerpt,
+      document: currentDocument,
+      seo
+    },
+    baseUrl: "http://localhost:3000"
+  });
 
   function markDirty() {
     setIsDirty(true);
@@ -104,6 +192,27 @@ export function BlockEditor({
     setBlocks((prev) => [...prev, newBlock]);
     setSelectedBlockId(newBlock.id);
     markDirty();
+  }
+
+  function insertInternalLinkBlock(targetHref: string, targetTitle: string) {
+    if (!canEdit) return;
+    const baseBlock = createDefaultBlock("button");
+    const newBlock: ContentBlock = {
+      ...baseBlock,
+      props: {
+        label: `Read: ${targetTitle}`,
+        href: targetHref,
+        variant: "outline",
+        align: "left"
+      }
+    };
+    setBlocks((prev) => [...prev, newBlock]);
+    setSelectedBlockId(newBlock.id);
+    markDirty();
+    setFeedback({
+      type: "success",
+      message: `Added internal link block pointing to "${targetTitle}" (${targetHref}).`
+    });
   }
 
   function updateBlockProps(blockId: string, patch: Record<string, unknown>) {
@@ -184,7 +293,10 @@ export function BlockEditor({
       setRevisionNote("");
       setFeedback({
         type: "success",
-        message: "Saved changes and recorded a new revision snapshot."
+        message:
+          item.status === "published" && item.slug !== normalizeSlug(slug || title)
+            ? `Saved changes, recorded revision, and auto-created a 301 redirect from old slug "${item.slug}".`
+            : "Saved changes and recorded a new revision snapshot."
       });
       router.refresh();
     });
@@ -221,7 +333,10 @@ export function BlockEditor({
       });
 
       if (!pubRes.ok) {
-        setFeedback({ type: "error", message: pubRes.error ?? "Failed to change publication status." });
+        setFeedback({
+          type: "error",
+          message: pubRes.error ?? "Failed to change publication status."
+        });
         return;
       }
 
@@ -252,6 +367,7 @@ export function BlockEditor({
       setSlug(rev.slug);
       setBlocks(rev.document.blocks);
       setSeo(rev.seo);
+      setSecondaryKeywordsInput((rev.seo.secondaryKeywords ?? []).join(", "));
       setIsDirty(false);
       setFeedback({
         type: "success",
@@ -262,6 +378,13 @@ export function BlockEditor({
   }
 
   const selectedBlock = blocks.find((b) => b.id === selectedBlockId) ?? null;
+
+  const scoreBadgeClass =
+    seoReport.overallScore >= 80
+      ? "bg-[#DCF4E7] text-success"
+      : seoReport.overallScore >= 55
+        ? "bg-[#F8EBD9] text-warning"
+        : "bg-[#FBE9E9] text-danger";
 
   return (
     <div className="space-y-6">
@@ -289,6 +412,14 @@ export function BlockEditor({
               >
                 {item.status === "published" ? "Published" : "Draft"}
               </span>
+              <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${scoreBadgeClass}`}>
+                TruSEO {seoReport.overallScore}/100
+              </span>
+              {seo.isCornerstone ? (
+                <span className="rounded-full bg-[#F8EBD9] px-2.5 py-0.5 text-xs font-semibold text-warning">
+                  ★ Cornerstone
+                </span>
+              ) : null}
               {isDirty ? (
                 <span className="rounded-full bg-[#F8EBD9] px-2.5 py-0.5 text-xs font-medium text-[#8A5A20]">
                   Unsaved changes
@@ -296,7 +427,8 @@ export function BlockEditor({
               ) : null}
             </div>
             <p className="mt-0.5 text-xs text-muted">
-              Public route: <code className="rounded bg-canvas px-1.5 py-0.5 text-ink">{publicUrl}</code>
+              Public route: <code className="rounded bg-canvas px-1.5 py-0.5 text-ink">{publicUrl}</code>{" "}
+              · {seoReport.stats.wordCount} words · {seoReport.stats.readingTimeMinutes} min read
             </p>
           </div>
         </div>
@@ -347,7 +479,11 @@ export function BlockEditor({
               type="button"
               disabled={!canPublish || isPending}
               onClick={() => handlePublishToggle("published")}
-              title={!canPublish ? "Authors cannot publish directly — ask an Editor or Admin" : "Publish live"}
+              title={
+                !canPublish
+                  ? "Authors cannot publish directly — ask an Editor or Admin"
+                  : "Publish live"
+              }
               className="inline-flex items-center gap-1.5 rounded-full bg-brand px-5 py-2.5 text-xs font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Globe size={15} aria-hidden="true" />
@@ -359,7 +495,9 @@ export function BlockEditor({
 
       {!canPublish ? (
         <div className="rounded-xl border border-[#E6C9A2] bg-[#F8EBD9] px-4 py-3 text-xs text-[#6E4514]">
-          <strong>Role Notice ({userRole}):</strong> You can edit and save drafts or preview privately, but publishing and unpublishing require an <strong>Editor</strong>, <strong>Admin</strong>, or <strong>Owner</strong> role.
+          <strong>Role Notice ({userRole}):</strong> You can edit and save drafts or preview
+          privately, but publishing and unpublishing require an <strong>Editor</strong>,{" "}
+          <strong>Admin</strong>, or <strong>Owner</strong> role.
         </div>
       ) : null}
 
@@ -380,7 +518,10 @@ export function BlockEditor({
       {/* Document Metadata Bar */}
       <div className="grid gap-4 rounded-2xl border border-line bg-white p-5 sm:grid-cols-3">
         <div>
-          <label htmlFor="doc-title" className="block text-xs font-semibold uppercase tracking-wider text-muted">
+          <label
+            htmlFor="doc-title"
+            className="block text-xs font-semibold uppercase tracking-wider text-muted"
+          >
             Title
           </label>
           <input
@@ -396,8 +537,11 @@ export function BlockEditor({
           />
         </div>
         <div>
-          <label htmlFor="doc-slug" className="block text-xs font-semibold uppercase tracking-wider text-muted">
-            URL Slug
+          <label
+            htmlFor="doc-slug"
+            className="block text-xs font-semibold uppercase tracking-wider text-muted"
+          >
+            URL Slug {item.status === "published" ? "(Auto-301 on rename)" : ""}
           </label>
           <input
             id="doc-slug"
@@ -412,7 +556,10 @@ export function BlockEditor({
           />
         </div>
         <div>
-          <label htmlFor="doc-note" className="block text-xs font-semibold uppercase tracking-wider text-muted">
+          <label
+            htmlFor="doc-note"
+            className="block text-xs font-semibold uppercase tracking-wider text-muted"
+          >
             Revision Note (optional)
           </label>
           <input
@@ -426,7 +573,10 @@ export function BlockEditor({
           />
         </div>
         <div className="sm:col-span-3">
-          <label htmlFor="doc-excerpt" className="block text-xs font-semibold uppercase tracking-wider text-muted">
+          <label
+            htmlFor="doc-excerpt"
+            className="block text-xs font-semibold uppercase tracking-wider text-muted"
+          >
             Excerpt / Summary
           </label>
           <input
@@ -449,7 +599,11 @@ export function BlockEditor({
           {[
             { id: "blocks", label: `Block Canvas (${blocks.length})`, icon: Sparkles },
             { id: "preview", label: "Responsive Preview", icon: Eye },
-            { id: "seo", label: "SEO & Taxonomies", icon: Search },
+            {
+              id: "seo",
+              label: `SEO & Intelligence (${seoReport.overallScore}/100)`,
+              icon: Search
+            },
             { id: "revisions", label: `Revisions (${revisions.length})`, icon: History }
           ].map(({ id, label, icon: Icon }) => {
             const active = activeTab === id;
@@ -485,7 +639,9 @@ export function BlockEditor({
                 type="button"
                 onClick={() => setViewport(id as ViewportSize)}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                  viewport === id ? "bg-brand-soft font-semibold text-brand" : "text-muted hover:text-ink"
+                  viewport === id
+                    ? "bg-brand-soft font-semibold text-brand"
+                    : "text-muted hover:text-ink"
                 }`}
               >
                 <Icon size={14} aria-hidden="true" />
@@ -619,7 +775,9 @@ export function BlockEditor({
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-muted">Alt Text (a11y)</label>
+                          <label className="block text-xs font-medium text-muted">
+                            Alt Text (a11y & SEO)
+                          </label>
                           <input
                             type="text"
                             disabled={!canEdit}
@@ -634,7 +792,9 @@ export function BlockEditor({
                     {block.type === "button" ? (
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div>
-                          <label className="block text-xs font-medium text-muted">Button Label</label>
+                          <label className="block text-xs font-medium text-muted">
+                            Button Label
+                          </label>
                           <input
                             type="text"
                             disabled={!canEdit}
@@ -644,7 +804,9 @@ export function BlockEditor({
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-muted">Destination URL</label>
+                          <label className="block text-xs font-medium text-muted">
+                            Destination URL
+                          </label>
                           <input
                             type="text"
                             disabled={!canEdit}
@@ -694,7 +856,9 @@ export function BlockEditor({
                               aria-label={`Column ${cIdx + 1} title`}
                               value={col.title}
                               onChange={(e) => {
-                                const current = [...((block.props.items as ColumnsBlockItem[]) ?? [])];
+                                const current = [
+                                  ...((block.props.items as ColumnsBlockItem[]) ?? [])
+                                ];
                                 current[cIdx] = { ...current[cIdx], title: e.target.value };
                                 updateBlockProps(block.id, { items: current });
                               }}
@@ -706,7 +870,9 @@ export function BlockEditor({
                               aria-label={`Column ${cIdx + 1} body`}
                               value={col.body}
                               onChange={(e) => {
-                                const current = [...((block.props.items as ColumnsBlockItem[]) ?? [])];
+                                const current = [
+                                  ...((block.props.items as ColumnsBlockItem[]) ?? [])
+                                ];
                                 current[cIdx] = { ...current[cIdx], body: e.target.value };
                                 updateBlockProps(block.id, { items: current });
                               }}
@@ -714,6 +880,59 @@ export function BlockEditor({
                             />
                           </div>
                         ))}
+                      </div>
+                    ) : null}
+
+                    {block.type === "faq" ? (
+                      <div className="space-y-3">
+                        <input
+                          type="text"
+                          disabled={!canEdit}
+                          aria-label="FAQ section heading"
+                          value={String(block.props.title ?? "Frequently Asked Questions")}
+                          onChange={(e) => updateBlockProps(block.id, { title: e.target.value })}
+                          className="w-full rounded-xl border border-line bg-canvas px-3 py-2 text-sm font-semibold text-ink"
+                        />
+                        <div className="space-y-2">
+                          {((block.props.items as FaqBlockItem[]) ?? []).map((faqItem, fIdx) => (
+                            <div
+                              key={fIdx}
+                              className="rounded-xl border border-line bg-canvas p-3"
+                            >
+                              <input
+                                type="text"
+                                disabled={!canEdit}
+                                aria-label={`FAQ Question ${fIdx + 1}`}
+                                value={faqItem.question}
+                                onChange={(e) => {
+                                  const current = [
+                                    ...((block.props.items as FaqBlockItem[]) ?? [])
+                                  ];
+                                  current[fIdx] = {
+                                    ...current[fIdx],
+                                    question: e.target.value
+                                  };
+                                  updateBlockProps(block.id, { items: current });
+                                }}
+                                className="w-full rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-ink"
+                              />
+                              <textarea
+                                rows={2}
+                                disabled={!canEdit}
+                                aria-label={`FAQ Answer ${fIdx + 1}`}
+                                value={faqItem.answer}
+                                onChange={(e) => {
+                                  const current = [
+                                    ...((block.props.items as FaqBlockItem[]) ?? [])
+                                  ];
+                                  current[fIdx] = { ...current[fIdx], answer: e.target.value };
+                                  updateBlockProps(block.id, { items: current });
+                                }}
+                                className="mt-1.5 w-full rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs text-muted"
+                              />
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -770,7 +989,9 @@ export function BlockEditor({
                 {selectedBlock.type === "heading" ? (
                   <>
                     <div>
-                      <label className="block text-xs font-semibold text-muted">Heading Level</label>
+                      <label className="block text-xs font-semibold text-muted">
+                        Heading Level
+                      </label>
                       <select
                         disabled={!canEdit}
                         value={Number(selectedBlock.props.level ?? 2)}
@@ -786,7 +1007,9 @@ export function BlockEditor({
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-muted">Text Alignment</label>
+                      <label className="block text-xs font-semibold text-muted">
+                        Text Alignment
+                      </label>
                       <select
                         disabled={!canEdit}
                         value={String(selectedBlock.props.align ?? "left")}
@@ -933,7 +1156,9 @@ export function BlockEditor({
                 {selectedBlock.type === "divider" ? (
                   <>
                     <div>
-                      <label className="block text-xs font-semibold text-muted">Divider Style</label>
+                      <label className="block text-xs font-semibold text-muted">
+                        Divider Style
+                      </label>
                       <select
                         disabled={!canEdit}
                         value={String(selectedBlock.props.style ?? "line")}
@@ -948,7 +1173,9 @@ export function BlockEditor({
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-muted">Vertical Spacing</label>
+                      <label className="block text-xs font-semibold text-muted">
+                        Vertical Spacing
+                      </label>
                       <select
                         disabled={!canEdit}
                         value={String(selectedBlock.props.spacing ?? "md")}
@@ -1003,7 +1230,9 @@ export function BlockEditor({
                       type="button"
                       disabled={!canEdit}
                       onClick={() => {
-                        const current = [...((selectedBlock.props.items as ColumnsBlockItem[]) ?? [])];
+                        const current = [
+                          ...((selectedBlock.props.items as ColumnsBlockItem[]) ?? [])
+                        ];
                         if (current.length < 6) {
                           current.push({ title: "New column", body: "Column description." });
                           updateBlockProps(selectedBlock.id, { items: current });
@@ -1012,6 +1241,39 @@ export function BlockEditor({
                       className="w-full rounded-xl border border-line bg-canvas py-2 text-xs font-semibold text-ink hover:border-brand"
                     >
                       + Add Column Item
+                    </button>
+                  </div>
+                ) : null}
+
+                {selectedBlock.type === "faq" ? (
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-ink">
+                      <input
+                        type="checkbox"
+                        disabled={!canEdit}
+                        checked={Boolean(selectedBlock.props.exclusive ?? true)}
+                        onChange={(e) =>
+                          updateBlockProps(selectedBlock.id, { exclusive: e.target.checked })
+                        }
+                      />
+                      Exclusive accordion (shared HTML <code>name</code> attribute)
+                    </label>
+                    <button
+                      type="button"
+                      disabled={!canEdit}
+                      onClick={() => {
+                        const current = [...((selectedBlock.props.items as FaqBlockItem[]) ?? [])];
+                        if (current.length < 15) {
+                          current.push({
+                            question: "New Frequently Asked Question?",
+                            answer: "Clear, concise answer for readers and FAQPage Schema.org."
+                          });
+                          updateBlockProps(selectedBlock.id, { items: current });
+                        }
+                      }}
+                      className="w-full rounded-xl border border-line bg-canvas py-2 text-xs font-semibold text-ink hover:border-brand"
+                    >
+                      + Add FAQ Question/Answer Pair
                     </button>
                   </div>
                 ) : null}
@@ -1049,108 +1311,544 @@ export function BlockEditor({
         </div>
       ) : null}
 
-      {/* TAB 3: SEO & TAXONOMIES */}
+      {/* TAB 3: BUILT-IN RANK MATH + YOAST + AIOSEO SUITE */}
       {activeTab === "seo" ? (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section className="space-y-4 rounded-2xl border border-line bg-white p-6">
-            <h3 className="text-base font-semibold">Search Engine & Social Metadata</h3>
-            <div>
-              <label htmlFor="seo-title" className="block text-xs font-semibold uppercase tracking-wider text-muted">
-                Meta Title
-              </label>
-              <input
-                id="seo-title"
-                type="text"
-                disabled={!canEdit}
-                value={seo.metaTitle ?? ""}
-                placeholder={title}
-                onChange={(e) => {
-                  setSeo((prev) => ({ ...prev, metaTitle: e.target.value }));
-                  markDirty();
-                }}
-                className="mt-1.5 w-full rounded-xl border border-line bg-canvas px-3.5 py-2.5 text-sm"
-              />
+        <div className="space-y-6">
+          {/* Score Bar: TruSEO Score + Readability Traffic Light + Cornerstone Toggle */}
+          <div className="grid gap-4 rounded-2xl border border-line bg-white p-5 sm:grid-cols-4">
+            <div className="rounded-2xl border border-line bg-canvas p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                TruSEO & Content Score
+              </p>
+              <div className="mt-1.5 flex items-baseline gap-2">
+                <span className="text-3xl font-semibold text-ink">
+                  {seoReport.overallScore}/100
+                </span>
+                <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${scoreBadgeClass}`}>
+                  {seoReport.status === "good"
+                    ? "Good"
+                    : seoReport.status === "ok"
+                      ? "Needs Improvement"
+                      : "Needs Work"}
+                </span>
+              </div>
             </div>
-            <div>
-              <label htmlFor="seo-desc" className="block text-xs font-semibold uppercase tracking-wider text-muted">
-                Meta Description
-              </label>
-              <textarea
-                id="seo-desc"
-                rows={3}
-                disabled={!canEdit}
-                value={seo.metaDescription ?? ""}
-                placeholder={excerpt || "Brief summary for search engines and social cards."}
-                onChange={(e) => {
-                  setSeo((prev) => ({ ...prev, metaDescription: e.target.value }));
-                  markDirty();
-                }}
-                className="mt-1.5 w-full rounded-xl border border-line bg-canvas px-3.5 py-2.5 text-sm"
-              />
-            </div>
-            <div>
-              <label htmlFor="seo-canon" className="block text-xs font-semibold uppercase tracking-wider text-muted">
-                Canonical URL (optional)
-              </label>
-              <input
-                id="seo-canon"
-                type="url"
-                disabled={!canEdit}
-                value={seo.canonicalUrl ?? ""}
-                placeholder={`http://localhost:3000${publicUrl}`}
-                onChange={(e) => {
-                  setSeo((prev) => ({ ...prev, canonicalUrl: e.target.value }));
-                  markDirty();
-                }}
-                className="mt-1.5 w-full rounded-xl border border-line bg-canvas px-3.5 py-2.5 font-mono text-sm"
-              />
-            </div>
-            <label className="flex items-center gap-2.5 pt-2 text-sm">
-              <input
-                type="checkbox"
-                disabled={!canEdit}
-                checked={Boolean(seo.noIndex)}
-                onChange={(e) => {
-                  setSeo((prev) => ({ ...prev, noIndex: e.target.checked }));
-                  markDirty();
-                }}
-              />
-              <span>Instruct search engines not to index this page (`noindex`)</span>
-            </label>
-          </section>
 
-          <section className="space-y-4 rounded-2xl border border-line bg-white p-6">
-            <h3 className="text-base font-semibold">Categories & Tags</h3>
-            <p className="text-xs text-muted">
-              Assign structured taxonomies to organize posts and pages.
-            </p>
-            <div className="space-y-2">
-              {taxonomies.map((tax) => {
-                const checked = selectedTaxonomies.includes(tax.id);
-                return (
+            <div className="rounded-2xl border border-line bg-canvas p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                Yoast Readability Analysis
+              </p>
+              <div className="mt-1.5 flex items-baseline gap-2">
+                <span className="text-2xl font-semibold capitalize text-ink">
+                  {seoReport.readabilityStatus}
+                </span>
+                <span className="text-xs font-normal text-muted">
+                  ({seoReport.stats.sentenceCount} sentences)
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-line bg-canvas p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                Keyword Density & Volume
+              </p>
+              <p className="mt-1.5 text-2xl font-semibold text-ink">
+                {seoReport.stats.keywordDensityPercent}%{" "}
+                <span className="text-xs font-normal text-muted">
+                  ({seoReport.stats.keywordCount} matches)
+                </span>
+              </p>
+            </div>
+
+            <div className="flex flex-col justify-between rounded-2xl border border-line bg-canvas p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                  Cornerstone Content
+                </span>
+                <Star size={14} className="text-warning" />
+              </div>
+              <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs font-semibold text-ink">
+                <input
+                  type="checkbox"
+                  disabled={!canEdit}
+                  checked={Boolean(seo.isCornerstone)}
+                  onChange={(e) => {
+                    setSeo((prev) => ({ ...prev, isCornerstone: e.target.checked }));
+                    markDirty();
+                  }}
+                />
+                <span>Mark as Cornerstone Pillar Content</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+            {/* Left Column: Keywords, Smart Tags, Meta Fields, Schema, Robots */}
+            <div className="space-y-6">
+              {/* Focus & Secondary Keywords */}
+              <section className="space-y-4 rounded-2xl border border-line bg-white p-6">
+                <h3 className="text-base font-semibold text-ink">
+                  Focus Keyword & Smart Tag Metadata
+                </h3>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="seo-focus-kw"
+                      className="block text-xs font-semibold uppercase tracking-wider text-muted"
+                    >
+                      Primary Focus Keyword
+                    </label>
+                    <input
+                      id="seo-focus-kw"
+                      type="text"
+                      disabled={!canEdit}
+                      placeholder="e.g. block registry"
+                      value={seo.focusKeyword ?? ""}
+                      onChange={(e) => {
+                        setSeo((prev) => ({ ...prev, focusKeyword: e.target.value }));
+                        markDirty();
+                      }}
+                      className="mt-1.5 w-full rounded-xl border border-line bg-canvas px-3.5 py-2 text-sm font-medium text-ink"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="seo-sec-kw"
+                      className="block text-xs font-semibold uppercase tracking-wider text-muted"
+                    >
+                      Secondary Keywords (comma-separated)
+                    </label>
+                    <input
+                      id="seo-sec-kw"
+                      type="text"
+                      disabled={!canEdit}
+                      placeholder="nextpress, schema, react"
+                      value={secondaryKeywordsInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSecondaryKeywordsInput(val);
+                        setSeo((prev) => ({
+                          ...prev,
+                          secondaryKeywords: val
+                            .split(",")
+                            .map((s) => s.trim())
+                            .filter(Boolean)
+                        }));
+                        markDirty();
+                      }}
+                      className="mt-1.5 w-full rounded-xl border border-line bg-canvas px-3.5 py-2 text-sm text-ink"
+                    />
+                  </div>
+                </div>
+
+                {/* Smart Tag Quick Insert */}
+                <div>
+                  <span className="block text-[11px] font-semibold uppercase tracking-wider text-muted">
+                    Insert Smart Tag Variable into SEO Title
+                  </span>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {SMART_TAGS.map((t) => (
+                      <button
+                        key={t.tag}
+                        type="button"
+                        disabled={!canEdit}
+                        onClick={() => {
+                          setSeo((prev) => ({
+                            ...prev,
+                            metaTitle: `${(prev.metaTitle ?? title).trim()} ${t.tag}`.trim()
+                          }));
+                          markDirty();
+                        }}
+                        className="rounded-lg border border-line bg-canvas px-2.5 py-1 font-mono text-[11px] text-brand hover:border-brand"
+                      >
+                        + {t.tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
                   <label
-                    key={tax.id}
-                    className={`flex cursor-pointer items-center justify-between rounded-xl border p-3 text-sm transition ${
-                      checked ? "border-brand bg-brand-soft/40" : "border-line bg-canvas"
-                    }`}
+                    htmlFor="seo-title"
+                    className="block text-xs font-semibold uppercase tracking-wider text-muted"
                   >
-                    <div className="flex items-center gap-2.5">
+                    SEO Title ({seoReport.resolvedTitle.length}/60 chars)
+                  </label>
+                  <input
+                    id="seo-title"
+                    type="text"
+                    disabled={!canEdit}
+                    value={seo.metaTitle ?? ""}
+                    placeholder="%%title%% %%sep%% %%sitename%%"
+                    onChange={(e) => {
+                      setSeo((prev) => ({ ...prev, metaTitle: e.target.value }));
+                      markDirty();
+                    }}
+                    className="mt-1.5 w-full rounded-xl border border-line bg-canvas px-3.5 py-2.5 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="seo-desc"
+                    className="block text-xs font-semibold uppercase tracking-wider text-muted"
+                  >
+                    Meta Description ({seoReport.resolvedDescription.length}/160 chars)
+                  </label>
+                  <textarea
+                    id="seo-desc"
+                    rows={3}
+                    disabled={!canEdit}
+                    value={seo.metaDescription ?? ""}
+                    placeholder={
+                      excerpt || "Brief summary for Google SERP snippets and social cards."
+                    }
+                    onChange={(e) => {
+                      setSeo((prev) => ({ ...prev, metaDescription: e.target.value }));
+                      markDirty();
+                    }}
+                    className="mt-1.5 w-full rounded-xl border border-line bg-canvas px-3.5 py-2.5 text-sm"
+                  />
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="seo-canon"
+                      className="block text-xs font-semibold uppercase tracking-wider text-muted"
+                    >
+                      Canonical URL
+                    </label>
+                    <input
+                      id="seo-canon"
+                      type="url"
+                      disabled={!canEdit}
+                      value={seo.canonicalUrl ?? ""}
+                      placeholder={`http://localhost:3000${publicUrl}`}
+                      onChange={(e) => {
+                        setSeo((prev) => ({ ...prev, canonicalUrl: e.target.value }));
+                        markDirty();
+                      }}
+                      className="mt-1.5 w-full rounded-xl border border-line bg-canvas px-3 py-2 font-mono text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="seo-schema"
+                      className="block text-xs font-semibold uppercase tracking-wider text-muted"
+                    >
+                      Schema.org Entity Type (@graph)
+                    </label>
+                    <select
+                      id="seo-schema"
+                      disabled={!canEdit}
+                      value={seo.schemaType ?? (item.kind === "post" ? "BlogPosting" : "WebPage")}
+                      onChange={(e) => {
+                        setSeo((prev) => ({
+                          ...prev,
+                          schemaType: e.target.value as SchemaEntityType
+                        }));
+                        markDirty();
+                      }}
+                      className="mt-1.5 w-full rounded-xl border border-line bg-canvas px-3 py-2 text-xs font-semibold text-ink"
+                    >
+                      {SCHEMA_ENTITY_TYPES.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Advanced Robots Directives */}
+                <div className="border-t border-line pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted">
+                    Advanced Robots Meta Directives
+                  </p>
+                  <div className="mt-2.5 flex flex-wrap gap-4 text-xs font-medium text-ink">
+                    <label className="flex items-center gap-1.5">
                       <input
                         type="checkbox"
                         disabled={!canEdit}
-                        checked={checked}
-                        onChange={() => toggleTaxonomy(tax.id)}
+                        checked={Boolean(seo.noIndex)}
+                        onChange={(e) => {
+                          setSeo((prev) => ({ ...prev, noIndex: e.target.checked }));
+                          markDirty();
+                        }}
                       />
-                      <span className="font-medium">{tax.name}</span>
+                      <code>noindex</code>
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        disabled={!canEdit}
+                        checked={Boolean(seo.noFollow)}
+                        onChange={(e) => {
+                          setSeo((prev) => ({ ...prev, noFollow: e.target.checked }));
+                          markDirty();
+                        }}
+                      />
+                      <code>nofollow</code>
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        disabled={!canEdit}
+                        checked={Boolean(seo.noArchive)}
+                        onChange={(e) => {
+                          setSeo((prev) => ({ ...prev, noArchive: e.target.checked }));
+                          markDirty();
+                        }}
+                      />
+                      <code>noarchive</code>
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        disabled={!canEdit}
+                        checked={Boolean(seo.noSnippet)}
+                        onChange={(e) => {
+                          setSeo((prev) => ({ ...prev, noSnippet: e.target.checked }));
+                          markDirty();
+                        }}
+                      />
+                      <code>nosnippet</code>
+                    </label>
+                  </div>
+                </div>
+              </section>
+
+              {/* Actionable 15-Check SEO & Readability Checklist */}
+              <section className="rounded-2xl border border-line bg-white p-6">
+                <h3 className="text-base font-semibold text-ink">
+                  Actionable SEO & Readability Checklist ({seoReport.checks.length} Checks)
+                </h3>
+                <div className="mt-4 space-y-2.5">
+                  {seoReport.checks.map((chk) => (
+                    <div
+                      key={chk.id}
+                      className="flex items-start justify-between gap-3 rounded-xl border border-line bg-canvas p-3"
+                    >
+                      <div className="flex items-start gap-2.5">
+                        {chk.status === "pass" ? (
+                          <CheckCircle2
+                            size={16}
+                            className="mt-0.5 shrink-0 text-success"
+                            aria-hidden="true"
+                          />
+                        ) : chk.status === "warn" ? (
+                          <AlertTriangle
+                            size={16}
+                            className="mt-0.5 shrink-0 text-warning"
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <AlertCircle
+                            size={16}
+                            className="mt-0.5 shrink-0 text-danger"
+                            aria-hidden="true"
+                          />
+                        )}
+                        <div>
+                          <p className="text-xs font-semibold text-ink">{chk.label}</p>
+                          <p className="mt-0.5 text-xs text-muted">{chk.detail}</p>
+                        </div>
+                      </div>
+                      <span className="rounded bg-white px-2 py-0.5 font-mono text-[10px] uppercase text-muted">
+                        {chk.category}
+                      </span>
                     </div>
-                    <span className="rounded-full bg-white px-2.5 py-0.5 text-xs uppercase text-muted">
-                      {tax.type}
-                    </span>
-                  </label>
-                );
-              })}
+                  ))}
+                </div>
+              </section>
             </div>
-          </section>
+
+            {/* Right Column: Live SERP Preview, Social Card, Schema @graph JSON-LD, Internal Links, Taxonomies */}
+            <div className="space-y-6">
+              {/* Interactive Google SERP & Social Card Preview */}
+              <section className="rounded-2xl border border-line bg-white p-6">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-base font-semibold text-ink">Google SERP Snippet Preview</h3>
+                  <div className="flex rounded-lg border border-line bg-canvas p-0.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setSerpDevice("desktop")}
+                      className={`rounded-md px-2.5 py-1 font-semibold ${
+                        serpDevice === "desktop" ? "bg-white text-ink shadow-2xs" : "text-muted"
+                      }`}
+                    >
+                      Desktop
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSerpDevice("mobile")}
+                      className={`rounded-md px-2.5 py-1 font-semibold ${
+                        serpDevice === "mobile" ? "bg-white text-ink shadow-2xs" : "text-muted"
+                      }`}
+                    >
+                      Mobile
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  className={`mt-3 rounded-2xl border border-line bg-white p-4 shadow-2xs ${
+                    serpDevice === "mobile" ? "max-w-[360px]" : ""
+                  }`}
+                >
+                  <p className="truncate text-xs text-[#202124]">
+                    {effectiveSite.domain || "localhost:3000"} › s › {siteSlug} › {slug}
+                  </p>
+                  <p className="mt-1 line-clamp-1 text-lg font-medium text-[#1a0dab] hover:underline">
+                    {seoReport.resolvedTitle}
+                  </p>
+                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#4d5156]">
+                    {seoReport.resolvedDescription ||
+                      "Add a meta description to control how this page appears in Google Search results."}
+                  </p>
+                </div>
+
+                {/* Social Card Inputs */}
+                <div className="mt-4 border-t border-line pt-4">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-ink">
+                    <Share2 size={14} className="text-brand" />
+                    <span>Open Graph & X/Twitter Card Overrides</span>
+                  </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <input
+                      type="text"
+                      disabled={!canEdit}
+                      placeholder="Custom Open Graph Title"
+                      value={seo.ogTitle ?? ""}
+                      onChange={(e) => {
+                        setSeo((prev) => ({ ...prev, ogTitle: e.target.value }));
+                        markDirty();
+                      }}
+                      className="rounded-xl border border-line bg-canvas px-3 py-2 text-xs text-ink"
+                    />
+                    <input
+                      type="text"
+                      disabled={!canEdit}
+                      placeholder="OG Image URL (/nextpress-mark.svg)"
+                      value={seo.ogImage ?? ""}
+                      onChange={(e) => {
+                        setSeo((prev) => ({ ...prev, ogImage: e.target.value }));
+                        markDirty();
+                      }}
+                      className="rounded-xl border border-line bg-canvas px-3 py-2 font-mono text-xs text-ink"
+                    />
+                  </div>
+                </div>
+
+                {/* Schema.org JSON-LD @graph Inspector */}
+                <div className="mt-4 border-t border-line pt-4">
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink">
+                      <Code2 size={14} className="text-brand" />
+                      Unified Schema.org JSON-LD <code>@graph</code>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowSchemaJson(!showSchemaJson)}
+                      className="rounded-lg border border-line bg-canvas px-2.5 py-1 text-[11px] font-semibold text-brand"
+                    >
+                      {showSchemaJson ? "Hide JSON-LD" : "Inspect JSON-LD"}
+                    </button>
+                  </div>
+                  {showSchemaJson ? (
+                    <pre className="mt-2.5 max-h-60 overflow-auto rounded-xl bg-[#111715] p-3 font-mono text-[11px] leading-5 text-[#E6ECE9]">
+                      {JSON.stringify(schemaGraph, null, 2)}
+                    </pre>
+                  ) : null}
+                </div>
+              </section>
+
+              {/* Internal Linking Suggestions (Yoast / AIOSEO Link Assistant) */}
+              <section className="rounded-2xl border border-line bg-white p-6">
+                <div className="flex items-center gap-2">
+                  <Link2 size={16} className="text-brand" />
+                  <h3 className="text-base font-semibold text-ink">
+                    Internal Link Assistant
+                  </h3>
+                </div>
+                <p className="mt-1 text-xs text-muted">
+                  Suggested Cornerstone & related pages on this site you have not linked to yet.
+                </p>
+
+                <div className="mt-3 space-y-2.5">
+                  {internalLinkSuggestions.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-line p-4 text-xs text-muted">
+                      Great job! This document already links to your key pages.
+                    </p>
+                  ) : (
+                    internalLinkSuggestions.map((sug) => (
+                      <div
+                        key={sug.id}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-line bg-canvas p-3"
+                      >
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-semibold text-ink">{sug.title}</span>
+                            {sug.isCornerstone ? (
+                              <span className="rounded bg-[#F8EBD9] px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                                ★ Cornerstone
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-0.5 font-mono text-[11px] text-muted">
+                            {sug.publicPath} · {sug.relevanceReason}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!canEdit}
+                          onClick={() => insertInternalLinkBlock(sug.publicPath, sug.title)}
+                          className="shrink-0 rounded-full border border-line bg-white px-3 py-1.5 text-xs font-semibold text-brand hover:border-brand"
+                        >
+                          {sug.alreadyLinked ? "Linked ✓" : "+ Insert Link"}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              {/* Categories & Tags */}
+              <section className="space-y-3 rounded-2xl border border-line bg-white p-6">
+                <h3 className="text-base font-semibold">Categories & Tags</h3>
+                <div className="space-y-2">
+                  {taxonomies.map((tax) => {
+                    const checked = selectedTaxonomies.includes(tax.id);
+                    return (
+                      <label
+                        key={tax.id}
+                        className={`flex cursor-pointer items-center justify-between rounded-xl border p-3 text-sm transition ${
+                          checked ? "border-brand bg-brand-soft/40" : "border-line bg-canvas"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <input
+                            type="checkbox"
+                            disabled={!canEdit}
+                            checked={checked}
+                            onChange={() => toggleTaxonomy(tax.id)}
+                          />
+                          <span className="font-medium">{tax.name}</span>
+                        </div>
+                        <span className="rounded-full bg-white px-2.5 py-0.5 text-xs uppercase text-muted">
+                          {tax.type}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </section>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -1160,7 +1858,8 @@ export function BlockEditor({
           <div className="border-b border-line px-6 py-4">
             <h3 className="text-base font-semibold">Versioned Revision History</h3>
             <p className="mt-1 text-xs text-muted">
-              Every save creates an immutable snapshot of your blocks and SEO metadata so you can recover earlier work safely.
+              Every save creates an immutable snapshot of your blocks and SEO metadata so you can
+              recover earlier work safely.
             </p>
           </div>
           <div className="divide-y divide-line">

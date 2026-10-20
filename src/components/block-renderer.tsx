@@ -8,6 +8,7 @@ import {
   type ContentBlock,
   type ContentDocument,
   type DividerBlockProps,
+  type FaqBlockProps,
   type HeadingBlockProps,
   type ImageBlockProps,
   type ParagraphBlockProps,
@@ -93,8 +94,13 @@ function renderBlock(block: ContentBlock): React.ReactNode {
               ? "aspect-square"
               : "";
       return (
-        <figure key={block.id} className="my-2 overflow-hidden rounded-2xl border border-line bg-canvas p-4">
-          <div className={`flex items-center justify-center overflow-hidden rounded-xl bg-white p-6 ${ratioClass}`}>
+        <figure
+          key={block.id}
+          className="my-2 overflow-hidden rounded-2xl border border-line bg-canvas p-4"
+        >
+          <div
+            className={`flex items-center justify-center overflow-hidden rounded-xl bg-white p-6 ${ratioClass}`}
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={safeSrc}
@@ -104,7 +110,9 @@ function renderBlock(block: ContentBlock): React.ReactNode {
             />
           </div>
           {props.caption ? (
-            <figcaption className="mt-3 text-center text-xs text-muted">{props.caption}</figcaption>
+            <figcaption className="mt-3 text-center text-xs text-muted">
+              {props.caption}
+            </figcaption>
           ) : null}
         </figure>
       );
@@ -148,7 +156,11 @@ function renderBlock(block: ContentBlock): React.ReactNode {
       }
       if (props.style === "dots") {
         return (
-          <div key={block.id} className={`flex justify-center gap-2 text-muted ${pad}`} aria-hidden="true">
+          <div
+            key={block.id}
+            className={`flex justify-center gap-2 text-muted ${pad}`}
+            aria-hidden="true"
+          >
             <span>•</span>
             <span>•</span>
             <span>•</span>
@@ -197,6 +209,48 @@ function renderBlock(block: ContentBlock): React.ReactNode {
       );
     }
 
+    case "faq": {
+      const props = block.props as unknown as FaqBlockProps;
+      const items = Array.isArray(props.items) ? props.items : [];
+      const heading = props.title || "Frequently Asked Questions";
+      const groupName = props.exclusive ? `faq-accordion-${block.id}` : undefined;
+      return (
+        <section
+          key={block.id}
+          aria-label={heading}
+          className="rounded-2xl border border-line bg-white p-6 shadow-xs"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-4">
+            <h2 className="text-xl font-semibold tracking-tight text-ink">{heading}</h2>
+            <span className="rounded-full bg-brand-soft px-2.5 py-0.5 text-[11px] font-semibold text-brand">
+              FAQPage Schema JSON-LD Active
+            </span>
+          </div>
+          <div className="mt-4 divide-y divide-line">
+            {items.map((item, idx) => (
+              <details
+                key={`${block.id}_faq_${idx}`}
+                name={groupName}
+                open={idx === 0}
+                className="group py-3.5"
+              >
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-left text-base font-semibold text-ink hover:text-brand">
+                  <span>{item.question}</span>
+                  <span
+                    aria-hidden="true"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-line text-xs text-muted transition group-open:rotate-45 group-open:border-brand group-open:text-brand"
+                  >
+                    +
+                  </span>
+                </summary>
+                <p className="mt-2.5 pr-8 text-sm leading-6 text-muted">{item.answer}</p>
+              </details>
+            ))}
+          </div>
+        </section>
+      );
+    }
+
     default:
       return null;
   }
@@ -213,9 +267,5 @@ export function BlockDocumentRenderer({ document }: { document: ContentDocument 
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {safeDoc.blocks.map((block) => renderBlock(block))}
-    </div>
-  );
+  return <div className="space-y-6">{safeDoc.blocks.map((block) => renderBlock(block))}</div>;
 }

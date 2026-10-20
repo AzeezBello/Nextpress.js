@@ -199,14 +199,35 @@ export function ContentTable({
                 return (
                   <tr key={item.id} className="transition hover:bg-canvas/50">
                     <th scope="row" className="px-5 py-4 font-semibold text-ink">
-                      <Link
-                        href={`/${kind}s/${item.id}`}
-                        className="hover:text-brand hover:underline"
-                      >
-                        {item.title}
-                      </Link>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          href={`/${kind}s/${item.id}`}
+                          className="hover:text-brand hover:underline"
+                        >
+                          {item.title}
+                        </Link>
+                        {item.isCornerstone ? (
+                          <span className="rounded-full bg-[#F8EBD9] px-2 py-0.5 text-[10px] font-semibold text-warning">
+                            ★ Cornerstone
+                          </span>
+                        ) : null}
+                        {typeof item.seoScore === "number" ? (
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              item.seoScore >= 80
+                                ? "bg-[#DCF4E7] text-success"
+                                : item.seoScore >= 55
+                                  ? "bg-[#F8EBD9] text-warning"
+                                  : "bg-[#FBE9E9] text-danger"
+                            }`}
+                          >
+                            SEO {item.seoScore}/100
+                          </span>
+                        ) : null}
+                      </div>
                       <p className="mt-1 text-xs font-normal text-muted">
                         By {item.authorName}
+                        {item.focusKeyword ? ` · Focus KW: "${item.focusKeyword}"` : ""}
                         {item.excerpt ? ` · ${item.excerpt}` : ""}
                       </p>
                     </th>

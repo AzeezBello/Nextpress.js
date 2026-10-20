@@ -29,15 +29,27 @@ NextPress.js serves both people building their own websites and teams delivering
   - Create, search, filter by status (`all`, `published`, `draft`), edit, preview, publish, unpublish, and delete pages and posts.
   - Separate `document_json` (working draft) and `published_document_json` (live public snapshot) so authors can iterate on drafts without mutating live content until published.
 - **Block Editor & Registered Block Schema (`/pages/[id]`, `/posts/[id]`):**
-  - Seven validated block types in `BLOCK_CATALOG`: `heading`, `paragraph`, `image`, `button`, `divider`, `callout`, and `columns`.
+  - Eight validated block types in `BLOCK_CATALOG`: `heading`, `paragraph`, `image`, `button`, `divider`, `callout`, `columns`, and `faq` (accessible `<details>` accordion with automatic `FAQPage` JSON-LD schema).
   - Keyboard-friendly block reordering (Move Up / Move Down), duplication, removal, and a side-by-side Block Property Inspector.
-  - Built-in **Responsive Preview** tab (`Desktop`, `Tablet`, `Mobile`), **SEO & Taxonomies** tab, and **Revision History** tab with one-click version restore.
+  - Built-in **Responsive Preview** tab (`Desktop`, `Tablet`, `Mobile`), **SEO Intelligence Suite** tab, and **Revision History** tab with one-click version restore.
+- **Built-in SEO Suite — Rank Math + Yoast SEO + AIOSEO by Default (`/seo` & Editor):**
+  - **TruSEO 0–100 Score & Yoast Readability Traffic Lights:** Real-time 15-check scoring across `Basic SEO`, `Additional SEO`, `Title Readability`, and `Content Readability` (transition words, passive voice, sentence length, subheading distribution), plus **Cornerstone Content** strict mode.
+  - **Smart Tags (`%%title%%`, `%%sep%%`, `%%sitename%%`, `%%tagline%%`, `%%excerpt%%`, `%%current_year%%`, `%%focuskw%%`):** Dynamic title and meta description templates at both the site level and per-item level.
+  - **SERP, OpenGraph & X/Twitter Previews:** Live Desktop/Mobile Google snippet preview and social card customization.
+  - **Unified Schema.org `@graph` Generator:** Emits connected JSON-LD (`Organization` / `LocalBusiness` / `Person`, `WebSite`, `BreadcrumbList`, `WebPage`, `Article` / `BlogPosting`, and automatic `FAQPage` entities extracted from `faq` blocks).
+  - **Internal Link Suggestions:** Automatic keyword-matched internal linking recommendations inside the block editor with 1-click insertion.
+  - **Redirections Manager & 404 Monitor:** `301`, `302`, `307`, `308`, and `410` redirects with hit tracking, **automatic `301` redirect creation** whenever a published page or post slug changes, and a 404 error log with 1-click redirect promotion.
+- **Appearance Studio (`/appearance`):**
+  - WordPress-inspired Appearance workspace with curated theme presets (*Editorial Indigo*, *Swiss Brutalist*, *Warm Literary*, *Forest Monograph*, *Midnight Cyber*), custom brand colors, typography pairings (`system`, `serif`, `mono`), border radius tokens, and a live theme preview canvas.
+- **Node Package Plugin Runtime (`/plugins`):**
+  - WordPress-style Plugins manager backed by **Node.js / npm packages** (`@nextpress/plugin-announcement-bar`, `@nextpress/plugin-reading-time`, `@nextpress/plugin-prism-syntax`, `@nextpress/plugin-web-vitals`, or any custom `@scope/nextpress-plugin-*` package).
+  - Install from the official catalog or register custom npm packages, toggle active/inactive state per site, edit JSON runtime configuration, and execute server-rendered hooks (`public:announcement_bar`, `content:before_article`, `content:after_article`, `seo:schema_graph`, `public:footer_badge`).
 - **Protected Previews & Public Rendering:**
   - Private draft preview at `/preview/[id]` (requires authenticated site membership; sets `noindex, nofollow`).
-  - Public site rendering at `/s/[siteSlug]`, `/s/[siteSlug]/[slug]`, and `/s/[siteSlug]/blog/[slug]` with dynamic `generateMetadata`, OpenGraph tags, `/sitemap.xml`, and `/robots.txt`.
+  - Public site rendering at `/s/[siteSlug]`, `/s/[siteSlug]/[slug]`, and `/s/[siteSlug]/blog/[slug]` with dynamic `generateMetadata`, OpenGraph tags, Schema.org `@graph`, redirect matching, 404 logging, `/sitemap.xml`, and `/robots.txt`.
 - **Media Library (`/media`) & Site Settings (`/settings`):**
   - Register media assets with MIME allowlist validation, 10 MB size limit, required `alt` text, and direct selection inside Image blocks.
-  - Configure site identity, custom domain, default SEO metadata, shared theme tokens (brand colors, heading font, border radius), and categories/tags.
+  - Configure site identity, custom domain, default SEO metadata, shared theme tokens, and categories/tags.
   - Audit log tracking (`audit_logs`) surfaced on `/dashboard`.
 
 ---
@@ -127,6 +139,9 @@ nextpress/
 │   │   │   ├── posts/page.tsx        # Posts directory & creation modal
 │   │   │   ├── posts/[id]/page.tsx   # Post block editor, taxonomies & revisions
 │   │   │   ├── media/page.tsx        # Media library manager
+│   │   │   ├── appearance/page.tsx   # Appearance Studio (theme presets, typography & tokens)
+│   │   │   ├── plugins/page.tsx      # Node Package Plugin Manager (@nextpress/plugin-*)
+│   │   │   ├── seo/page.tsx          # SEO Command Center (Rank Math + Yoast + AIOSEO suite)
 │   │   │   └── settings/page.tsx     # Site identity, theme tokens, roles & taxonomies
 │   │   ├── login/page.tsx            # Sign-in form & 1-click demo persona switcher
 │   │   ├── preview/[id]/page.tsx     # Protected private draft preview route
@@ -140,21 +155,26 @@ nextpress/
 │   │   ├── robots.ts                 # Dynamic robots.txt generator
 │   │   └── sitemap.ts                # Dynamic sitemap.xml generator
 │   ├── components/
-│   │   ├── block-editor.tsx          # Interactive block editor, inspector & revision UI
+│   │   ├── appearance-studio.tsx     # WordPress-style theme preset & design token customizer
+│   │   ├── block-editor.tsx          # Interactive block editor, TruSEO/Readability & revisions
 │   │   ├── block-renderer.tsx        # Server-safe React renderer for ContentDocument
-│   │   ├── content-table.tsx         # Container-query table & native <dialog> modal
+│   │   ├── content-table.tsx         # Container-query table, SEO scores & native <dialog>
 │   │   ├── dashboard-shell.tsx       # Authenticated shell with header role switcher
 │   │   ├── media-manager.tsx         # Media asset grid & registration dialog
-│   │   ├── public-site-shell.tsx     # Public site header, nav, theme wrapper & footer
+│   │   ├── plugins-manager.tsx       # Node package plugin catalog, installer & JSON config UI
+│   │   ├── public-site-shell.tsx     # Public site header, nav, plugin hook slots & footer
+│   │   ├── seo-hub.tsx               # SEO Command Center (audit, redirects, 404s, schema)
 │   │   ├── sidebar-nav.tsx           # Workspace navigation & multi-site switcher
 │   │   ├── sign-in-form.tsx          # Accessible autofill-compliant login form
 │   │   └── site-settings-form.tsx    # Site identity, design tokens & taxonomy forms
 │   └── lib/
-│       ├── actions.ts                # Server Actions for auth, CRUD, publishing & settings
+│       ├── actions.ts                # Server Actions for auth, CRUD, SEO, appearance & plugins
 │       ├── auth.ts                   # Server session helpers (getCurrentSession, requireSession)
 │       ├── content-types.ts          # Block schemas, validators, URL sanitizer & migrations
 │       ├── db.ts                     # SQLite database, migrations, seed data & queries
 │       ├── permissions.ts            # RBAC permission matrix (Owner, Admin, Editor, Author)
+│       ├── plugins.ts                # Node package plugin registry, validators & hook types
+│       ├── seo-engine.ts             # TruSEO + Readability scorer, Smart Tags & Schema @graph
 │       └── utils.ts                  # Class name utilities
 ├── tests/
 │   ├── cms.test.mts                  # Automated unit & integration test suite
@@ -178,7 +198,7 @@ type ContentDocument = {
 
 type ContentBlock = {
   id: string;
-  type: "heading" | "paragraph" | "image" | "button" | "divider" | "callout" | "columns";
+  type: "heading" | "paragraph" | "image" | "button" | "divider" | "callout" | "columns" | "faq";
   version: number;
   props: Record<string, unknown>;
   children?: ContentBlock[];

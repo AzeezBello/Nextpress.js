@@ -5,21 +5,34 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   authenticateUser,
+  clearNotFoundLogs,
   createContentItem,
+  createRedirect,
   createSessionForUser,
   createTaxonomy,
   deleteContentItem,
   deleteMediaAsset,
+  deleteRedirect,
   deleteSessionByToken,
+  installNodePluginPackage,
   registerMediaAsset,
   restoreRevision,
   setContentPublicationStatus,
   switchSessionActiveSite,
+  toggleSitePlugin,
+  uninstallSitePlugin,
   updateContentItem,
+  updateSitePluginConfig,
   updateSiteSettings
 } from "@/lib/db";
 import { getCurrentSession, requireSession, SESSION_COOKIE_NAME } from "@/lib/auth";
-import type { ContentKind, SeoMetadata, ThemeSettings } from "@/lib/content-types";
+import type {
+  ContentKind,
+  RedirectStatusCode,
+  SeoMetadata,
+  ThemeSettings
+} from "@/lib/content-types";
+import type { PluginHookName } from "@/lib/plugins";
 
 export async function signInAction(
   _prevState: { error?: string } | null,
@@ -308,6 +321,167 @@ export async function saveSiteSettingsAction(payload: {
 
   revalidatePath("/", "layout");
   revalidatePath("/settings");
+  revalidatePath("/seo");
+  revalidatePath(`/s/${session.activeSite.slug}`, "layout");
+  return { ok: true };
+}
+
+export async function createRedirectAction(payload: {
+  sourcePath: string;
+  destinationUrl: string;
+  statusCode: RedirectStatusCode;
+  isRegex?: boolean;
+  note?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const session = await requireSession();
+  const res = createRedirect({
+    siteId: session.activeSite.id,
+    actorId: session.user.id,
+    ...payload
+  });
+  if (!res.ok) {
+    return { ok: false, error: res.error };
+  }
+  revalidatePath("/seo");
+  return { ok: true };
+}
+
+export async function deleteRedirectAction(redirectId: string): Promise<{ ok: boolean; error?: string }> {
+  const session = await requireSession();
+  const res = deleteRedirect({
+    siteId: session.activeSite.id,
+    redirectId,
+    actorId: session.user.id
+  });
+  if (!res.ok) {
+    return { ok: false, error: res.error };
+  }
+  revalidatePath("/seo");
+  return { ok: true };
+}
+
+export async function clear404LogsAction(logId?: string): Promise<{ ok: boolean; error?: string }> {
+  const session = await requireSession();
+  const res = clearNotFoundLogs({
+    siteId: session.activeSite.id,
+    actorId: session.user.id,
+    logId
+  });
+  if (!res.ok) {
+    return { ok: false, error: res.error };
+  }
+  revalidatePath("/seo");
+  return { ok: true };
+}
+
+export async function saveAppearanceThemeAction(
+  themeSettings: ThemeSettings
+): Promise<{ ok: boolean; error?: string }> {
+  const session = await requireSession();
+  const site = session.activeSite;
+  const res = updateSiteSettings({
+    siteId: site.id,
+    actorId: session.user.id,
+    name: site.name,
+    tagline: site.tagline,
+    description: site.description,
+    domain: site.domain ?? "",
+    themeSettings,
+    seoDefaults: site.seoDefaults
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: res.error };
+  }
+
+  revalidatePath("/", "layout");
+  revalidatePath("/appearance");
+  revalidatePath("/settings");
+  revalidatePath(`/s/${site.slug}`, "layout");
+  return { ok: true };
+}
+
+export async function installPluginAction(payload: {
+  packageName: string;
+  displayName?: string;
+  version?: string;
+  description?: string;
+  author?: string;
+  hooks?: PluginHookName[];
+}): Promise<{ ok: boolean; error?: string }> {
+  const session = await requireSession();
+  const res = installNodePluginPackage({
+    siteId: session.activeSite.id,
+    actorId: session.user.id,
+    ...payload
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: res.error };
+  }
+
+  revalidatePath("/plugins");
+  revalidatePath(`/s/${session.activeSite.slug}`, "layout");
+  return { ok: true };
+}
+
+export async function togglePluginAction(payload: {
+  pluginId: string;
+  enabled: boolean;
+}): Promise<{ ok: boolean; error?: string }> {
+  const session = await requireSession();
+  const res = toggleSitePlugin({
+    siteId: session.activeSite.id,
+    actorId: session.user.id,
+    pluginId: payload.pluginId,
+    enabled: payload.enabled
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: res.error };
+  }
+
+  revalidatePath("/plugins");
+  revalidatePath(`/s/${session.activeSite.slug}`, "layout");
+  return { ok: true };
+}
+
+export async function updatePluginConfigAction(payload: {
+  pluginId: string;
+  config: Record<string, string | boolean | number>;
+}): Promise<{ ok: boolean; error?: string }> {
+  const session = await requireSession();
+  const res = updateSitePluginConfig({
+    siteId: session.activeSite.id,
+    actorId: session.user.id,
+    pluginId: payload.pluginId,
+    config: payload.config
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: res.error };
+  }
+
+  revalidatePath("/plugins");
+  revalidatePath(`/s/${session.activeSite.slug}`, "layout");
+  return { ok: true };
+}
+
+export async function uninstallPluginAction(
+  pluginId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const session = await requireSession();
+  const res = uninstallSitePlugin({
+    siteId: session.activeSite.id,
+    actorId: session.user.id,
+    pluginId
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: res.error };
+  }
+
+  revalidatePath("/plugins");
   revalidatePath(`/s/${session.activeSite.slug}`, "layout");
   return { ok: true };
 }
