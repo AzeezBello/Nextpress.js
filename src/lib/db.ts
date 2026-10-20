@@ -73,16 +73,40 @@ function generateId(prefix: string): string {
   return `${prefix}_${crypto.randomBytes(6).toString("hex")}`;
 }
 
+const LATEST_SCHEMA_VERSION = 3;
+
 declare global {
   var __nextpressDb: DatabaseSync | undefined;
   var __nextpressDbPath: string | undefined;
+  var __nextpressDbIno: number | undefined;
+  var __nextpressSchemaVersion: number | undefined;
 }
 
 export function getDb(): DatabaseSync {
   const targetPath =
     process.env.NEXTPRESS_DB_PATH || path.join(process.cwd(), "data", "nextpress.sqlite");
 
+  if (targetPath !== ":memory:" && globalThis.__nextpressDb) {
+    const currentIno = fs.existsSync(targetPath) ? fs.statSync(targetPath).ino : undefined;
+    if (!currentIno || (globalThis.__nextpressDbIno && currentIno !== globalThis.__nextpressDbIno)) {
+      try {
+        globalThis.__nextpressDb.close();
+      } catch {
+        // ignore close errors on stale handle
+      }
+      globalThis.__nextpressDb = undefined;
+      globalThis.__nextpressDbPath = undefined;
+      globalThis.__nextpressDbIno = undefined;
+      globalThis.__nextpressSchemaVersion = undefined;
+    }
+  }
+
   if (globalThis.__nextpressDb && globalThis.__nextpressDbPath === targetPath) {
+    if (globalThis.__nextpressSchemaVersion !== LATEST_SCHEMA_VERSION) {
+      runMigrations(globalThis.__nextpressDb);
+      seedDatabaseIfNeeded(globalThis.__nextpressDb);
+      globalThis.__nextpressSchemaVersion = LATEST_SCHEMA_VERSION;
+    }
     return globalThis.__nextpressDb;
   }
 
@@ -104,6 +128,11 @@ export function getDb(): DatabaseSync {
 
   globalThis.__nextpressDb = db;
   globalThis.__nextpressDbPath = targetPath;
+  globalThis.__nextpressDbIno =
+    targetPath !== ":memory:" && fs.existsSync(targetPath)
+      ? fs.statSync(targetPath).ino
+      : undefined;
+  globalThis.__nextpressSchemaVersion = LATEST_SCHEMA_VERSION;
   return db;
 }
 
@@ -117,6 +146,8 @@ export function resetDbForTests(): void {
   }
   globalThis.__nextpressDb = undefined;
   globalThis.__nextpressDbPath = undefined;
+  globalThis.__nextpressDbIno = undefined;
+  globalThis.__nextpressSchemaVersion = undefined;
 }
 
 function runMigrations(db: DatabaseSync): void {
