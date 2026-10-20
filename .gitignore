@@ -11,3 +11,4 @@ coverage/
 .DS_Store
 .vercel/
 /data/*.sqlite*
+*.tsbuildinfo
