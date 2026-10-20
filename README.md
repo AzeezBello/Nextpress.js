@@ -108,9 +108,13 @@ npm test          # Run automated unit & integration tests (node:test)
 
 ```text
 nextpress/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                    # GitHub Actions CI (typecheck, lint, test, build)
 ├── docs/
 │   ├── ARCHITECTURE.md               # Proposed modular monolith architecture
 │   ├── AUDIT-REPORT.md               # Milestone 0 repository audit report
+│   ├── BRANCH-PROTECTION.md          # CI gates & GitHub branch protection setup
 │   └── REPOSITORY-AUDIT-CHECKLIST.md # Baseline audit checklist
 ├── public/
 │   └── nextpress-mark.svg            # Default vector emblem

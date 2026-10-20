@@ -4,14 +4,16 @@
 - **Repository:** `https://github.com/AzeezBello/Nextpress.js.git`
 - **Branch & Commit:** `main` at `ae8aed3` (working tree clean at audit start)
 - **Node & Package Manager:** Node.js `v24.15.0`, npm `11.12.1` (`package-lock.json` present)
-- **Framework Stack:** Next.js `16.4.2`, React `19.3.1`, TypeScript `5.9.3`, Tailwind CSS `4.3.3`, ESLint `9.39.5`
+- **Framework Stack:** Next.js `16.4.2`, React `19.3.1`, TypeScript `5.9.3`, Tailwind CSS `4.3.3`, ESLint `9.39.5`, `eslint-config-next` `16.4.2`
 
 ## 2. Baseline Command Verification & Root Causes Found
 - **`npm run typecheck`:** Passed (`tsc --noEmit` exited 0).
-- **`npm run lint`:** Failed in starter scaffold because `eslint-config-next@14.2.35` was paired with ESLint 9 flat config (`eslint.config.mjs`), causing `ERR_MODULE_NOT_FOUND` on `eslint-config-next/core-web-vitals` and legacy ESLint 8 `context.getScope` / `context.getAncestors` API mismatches.
-  - **Resolution:** Updated `eslint.config.mjs` to bridge `@next/eslint-plugin-next`, `@typescript-eslint`, `eslint-plugin-react-hooks`, and `eslint-plugin-jsx-a11y` cleanly under ESLint 9 flat config.
+- **`npm run lint`:** Failed in starter scaffold because `eslint-config-next@14.2.35` was paired with Next.js `16.4.2` and ESLint 9 flat config (`eslint.config.mjs`), causing `ERR_MODULE_NOT_FOUND` on `eslint-config-next/core-web-vitals`.
+  - **Resolution:** Upgraded `eslint-config-next` to `^16.4.2` in `package.json` and `package-lock.json` to match `next@16.4.2`, allowing `eslint.config.mjs` to use native `eslint-config-next/core-web-vitals` and `eslint-config-next/typescript` flat-config exports directly.
 - **`npm run build`:** Failed in starter scaffold because `tailwindcss@4.3.3` was installed with a Tailwind v3 `postcss.config.js` (`tailwindcss: {}`), which throws in Tailwind v4 without a PostCSS adapter, and Turbopack child-process IPC failed in restricted environments.
   - **Resolution:** Added `postcss-tailwind.cjs` powered by Tailwind v4's `compile()` API, migrated `src/app/globals.css` to `@import "tailwindcss"` + `@theme` design tokens, and configured `next build --webpack`.
+- **Continuous Integration & Branch Protection:** Missing in starter repository.
+  - **Resolution:** Added `.github/workflows/ci.yml` (`Verify (typecheck, lint, test, build)`) and documented GitHub branch protection rules and `gh api` automation in `docs/BRANCH-PROTECTION.md`.
 
 ## 3. Feature Status Matrix (Pre-Implementation)
 | Subsystem | Starter Status | Decision | Target Milestone |
