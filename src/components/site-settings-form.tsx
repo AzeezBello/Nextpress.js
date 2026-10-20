@@ -93,7 +93,7 @@ export function SiteSettingsForm({
     <div className="space-y-8">
       {!canManageSite ? (
         <div className="rounded-xl border border-[#E6C9A2] bg-[#F8EBD9] px-4 py-3 text-xs text-[#6E4514]">
-          <strong>Read-only Site Configuration ({userRole}):</strong> Only <strong>Owners</strong> and <strong>Administrators</strong> can save changes to site identity and theme tokens.
+          <strong>Read-only Site Configuration ({userRole}):</strong> Only <strong>Owners</strong>, <strong>Administrators</strong>, and <strong>Developers</strong> can save changes to site identity and theme tokens.
         </div>
       ) : null}
 

@@ -7,7 +7,7 @@ export const CURRENT_DOCUMENT_SCHEMA_VERSION = 1;
 
 export type ContentStatus = "draft" | "published" | "scheduled" | "archived";
 export type ContentKind = "page" | "post";
-export type SiteRole = "owner" | "admin" | "editor" | "author";
+export type SiteRole = "owner" | "admin" | "developer" | "editor" | "author";
 
 export type BlockType =
   | "heading"

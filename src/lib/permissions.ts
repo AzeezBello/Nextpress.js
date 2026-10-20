@@ -3,6 +3,8 @@ import type { SiteRole } from "@/lib/content-types";
 export type PermissionAction =
   | "site:read"
   | "site:manage"
+  | "plugins:manage"
+  | "theme:manage"
   | "members:manage"
   | "content:create"
   | "content:edit_own"
@@ -16,6 +18,8 @@ const ROLE_PERMISSIONS: Record<SiteRole, readonly PermissionAction[]> = {
   owner: [
     "site:read",
     "site:manage",
+    "plugins:manage",
+    "theme:manage",
     "members:manage",
     "content:create",
     "content:edit_own",
@@ -28,6 +32,21 @@ const ROLE_PERMISSIONS: Record<SiteRole, readonly PermissionAction[]> = {
   admin: [
     "site:read",
     "site:manage",
+    "plugins:manage",
+    "theme:manage",
+    "content:create",
+    "content:edit_own",
+    "content:edit_any",
+    "content:publish",
+    "content:delete",
+    "media:manage",
+    "taxonomy:manage"
+  ],
+  developer: [
+    "site:read",
+    "site:manage",
+    "plugins:manage",
+    "theme:manage",
     "content:create",
     "content:edit_own",
     "content:edit_any",
@@ -79,6 +98,11 @@ export const ROLE_DESCRIPTIONS: Record<SiteRole, { label: string; summary: strin
   admin: {
     label: "Administrator",
     summary: "Manages site configuration, design tokens, media, and all content publishing."
+  },
+  developer: {
+    label: "Developer",
+    summary:
+      "Installs and configures Node package plugins, Appearance theme tokens, technical SEO/schema, and content."
   },
   editor: {
     label: "Editor",

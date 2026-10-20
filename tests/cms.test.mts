@@ -32,7 +32,11 @@ import {
   buildSchemaGraph,
   resolveSmartTags
 } from "../src/lib/seo-engine.ts";
-import { isValidNpmPackageName } from "../src/lib/plugins.ts";
+import {
+  isValidNpmPackageName,
+  NODE_PLUGIN_DIRECTORY,
+  searchNodePluginDirectory
+} from "../src/lib/plugins.ts";
 
 describe("NextPress.js Core CMS & Publishing Suite", () => {
   beforeEach(() => {
@@ -68,6 +72,10 @@ describe("NextPress.js Core CMS & Publishing Suite", () => {
   it("enforces role hierarchy and content ownership permissions", () => {
     assert.equal(hasPermission("owner", "site:manage"), true);
     assert.equal(hasPermission("admin", "site:manage"), true);
+    assert.equal(hasPermission("developer", "site:manage"), true);
+    assert.equal(hasPermission("developer", "plugins:manage"), true);
+    assert.equal(hasPermission("developer", "theme:manage"), true);
+    assert.equal(hasPermission("developer", "members:manage"), false);
     assert.equal(hasPermission("editor", "site:manage"), false);
     assert.equal(hasPermission("editor", "content:publish"), true);
     assert.equal(hasPermission("author", "content:publish"), false);
@@ -367,6 +375,14 @@ describe("NextPress.js Core CMS & Publishing Suite", () => {
     });
     assert.equal(forbiddenInstall.ok, false);
 
+    // Developer can install and toggle a Node package plugin
+    const installedByDev = installNodePluginPackage({
+      siteId: "site_flagship",
+      actorId: "usr_developer",
+      packageName: "@nextpress/plugin-stripe-checkout"
+    });
+    assert.equal(installedByDev.ok, true);
+
     // Owner installs and toggles a Node package plugin
     const installed = installNodePluginPackage({
       siteId: "site_flagship",
@@ -387,5 +403,30 @@ describe("NextPress.js Core CMS & Publishing Suite", () => {
       enabled: false
     });
     assert.equal(toggled.ok, true);
+
+    // Dynamic search by name or category (WordPress-style Add New Plugin directory)
+    assert.ok(NODE_PLUGIN_DIRECTORY.length >= 16);
+
+    const byName = searchNodePluginDirectory({ query: "Stripe", searchBy: "name" });
+    assert.ok(byName.some((p) => p.packageName === "@nextpress/plugin-stripe-checkout"));
+
+    const byCategoryQuery = searchNodePluginDirectory({
+      query: "security",
+      searchBy: "category"
+    });
+    assert.ok(byCategoryQuery.length >= 2);
+    assert.ok(byCategoryQuery.every((p) => p.category === "security"));
+
+    const byCategoryPill = searchNodePluginDirectory({
+      category: "seo"
+    });
+    assert.ok(byCategoryPill.length >= 2);
+    assert.ok(byCategoryPill.every((p) => p.category === "seo"));
+
+    // Custom npm package query dynamically synthesizes an installable card
+    const customDynamic = searchNodePluginDirectory({
+      query: "@acme/nextpress-plugin-algolia"
+    });
+    assert.equal(customDynamic[0]?.packageName, "@acme/nextpress-plugin-algolia");
   });
 });

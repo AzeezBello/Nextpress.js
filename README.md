@@ -20,7 +20,7 @@ NextPress.js serves both people building their own websites and teams delivering
 
 - **Authentication & Role-Based Access Control (`/login`):**
   - Server-side session cookies (`np_session`) backed by SQLite.
-  - Four enforced site membership roles: `Owner`, `Administrator`, `Editor`, and `Author`.
+  - Five enforced site membership roles: `Owner`, `Administrator`, `Developer`, `Editor`, and `Author`.
   - Instant 1-click demo role switcher on `/login` and in the dashboard header to test permission guardrails immediately.
 - **Multi-Site Workspaces:**
   - Site-scoped content, media, taxonomies, and memberships.
@@ -62,6 +62,7 @@ All demo accounts share the default password `nextpress123` (or you can switch b
 |---|---|---|---|
 | **Ada Lovelace** | `ada@nextpress.dev` | `Owner` | Full control over site settings, memberships, media, and publishing |
 | **Alex Rivera** | `alex@nextpress.dev` | `Administrator` | Manages site configuration, theme tokens, media, and all content publishing |
+| **Devon Park** | `devon@nextpress.dev` | `Developer` | Installs and configures Node package plugins, Appearance theme tokens, technical SEO/schema, and content |
 | **Elena Rostova** | `elena@nextpress.dev` | `Editor` | Creates, edits, previews, publishes, and unpublishes any page or post |
 | **Marcus Vance** | `marcus@nextpress.dev` | `Author` | Creates and edits own drafts and media; cannot publish or modify site settings |
 

@@ -27,6 +27,7 @@ import { canEditContent, hasPermission } from "@/lib/permissions";
 import { analyzeSeoAndReadability } from "@/lib/seo-engine";
 import {
   isValidNpmPackageName,
+  NODE_PLUGIN_DIRECTORY,
   OFFICIAL_NODE_PLUGIN_PACKAGES,
   type PluginHookName,
   type SitePluginRecord
@@ -73,7 +74,7 @@ function generateId(prefix: string): string {
   return `${prefix}_${crypto.randomBytes(6).toString("hex")}`;
 }
 
-const LATEST_SCHEMA_VERSION = 3;
+const LATEST_SCHEMA_VERSION = 4;
 
 declare global {
   var __nextpressDb: DatabaseSync | undefined;
@@ -195,7 +196,7 @@ function runMigrations(db: DatabaseSync): void {
         id TEXT PRIMARY KEY,
         site_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('owner', 'admin', 'editor', 'author')),
+        role TEXT NOT NULL CHECK(role IN ('owner', 'admin', 'developer', 'editor', 'author')),
         status TEXT NOT NULL DEFAULT 'active',
         created_at TEXT NOT NULL,
         UNIQUE(site_id, user_id),
@@ -387,6 +388,36 @@ function runMigrations(db: DatabaseSync): void {
       "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)"
     ).run(3, "003_site_node_plugins", new Date().toISOString());
   }
+
+  const appliedV4 = db
+    .prepare("SELECT version FROM schema_migrations WHERE version = 4")
+    .get() as { version: number } | undefined;
+
+  if (!appliedV4) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS memberships_v4 (
+        id TEXT PRIMARY KEY,
+        site_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('owner', 'admin', 'developer', 'editor', 'author')),
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        UNIQUE(site_id, user_id),
+        FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+
+      INSERT OR IGNORE INTO memberships_v4 (id, site_id, user_id, role, status, created_at)
+      SELECT id, site_id, user_id, role, status, created_at FROM memberships;
+
+      DROP TABLE memberships;
+      ALTER TABLE memberships_v4 RENAME TO memberships;
+    `);
+
+    db.prepare(
+      "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)"
+    ).run(4, "004_developer_role", new Date().toISOString());
+  }
 }
 
 function seedSeoTablesIfNeeded(db: DatabaseSync, now: string): void {
@@ -503,6 +534,33 @@ function seedSeoTablesIfNeeded(db: DatabaseSync, now: string): void {
       );
     }
   }
+
+  // Ensure the Developer demo user & site memberships exist on upgraded databases
+  const devUser = db
+    .prepare("SELECT id FROM users WHERE id = 'usr_developer'")
+    .get() as { id: string } | undefined;
+  if (!devUser) {
+    const defaultPasswordHash = hashPassword("nextpress123");
+    db.prepare(
+      `INSERT OR IGNORE INTO users (id, email, name, password_hash, avatar_initials, status, created_at, updated_at)
+       VALUES ('usr_developer', 'devon@nextpress.dev', 'Devon Park', ?, 'DP', 'active', ?, ?)`
+    ).run(defaultPasswordHash, now, now);
+
+    db.prepare(
+      `INSERT OR IGNORE INTO memberships (id, site_id, user_id, role, status, created_at)
+       VALUES ('mem_dev_1', 'site_flagship', 'usr_developer', 'developer', 'active', ?)`
+    ).run(now);
+
+    const nwExists = db
+      .prepare("SELECT id FROM sites WHERE id = 'site_northwind'")
+      .get() as { id: string } | undefined;
+    if (nwExists) {
+      db.prepare(
+        `INSERT OR IGNORE INTO memberships (id, site_id, user_id, role, status, created_at)
+         VALUES ('mem_dev_2', 'site_northwind', 'usr_developer', 'developer', 'active', ?)`
+      ).run(now);
+    }
+  }
 }
 
 function seedDatabaseIfNeeded(db: DatabaseSync): void {
@@ -515,7 +573,7 @@ function seedDatabaseIfNeeded(db: DatabaseSync): void {
 
   const defaultPasswordHash = hashPassword("nextpress123");
 
-  // 1. Seed Users (Owner, Admin, Editor, Author)
+  // 1. Seed Users (Owner, Admin, Developer, Editor, Author)
   const insertUser = db.prepare(`
     INSERT INTO users (id, email, name, password_hash, avatar_initials, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
@@ -523,6 +581,7 @@ function seedDatabaseIfNeeded(db: DatabaseSync): void {
 
   insertUser.run("usr_owner", "ada@nextpress.dev", "Ada Lovelace", defaultPasswordHash, "AL", now, now);
   insertUser.run("usr_admin", "alex@nextpress.dev", "Alex Rivera", defaultPasswordHash, "AR", now, now);
+  insertUser.run("usr_developer", "devon@nextpress.dev", "Devon Park", defaultPasswordHash, "DP", now, now);
   insertUser.run("usr_editor", "elena@nextpress.dev", "Elena Rostova", defaultPasswordHash, "ER", now, now);
   insertUser.run("usr_author", "marcus@nextpress.dev", "Marcus Vance", defaultPasswordHash, "MV", now, now);
 
@@ -610,10 +669,12 @@ function seedDatabaseIfNeeded(db: DatabaseSync): void {
 
   insertMembership.run("mem_1", "site_flagship", "usr_owner", "owner", now);
   insertMembership.run("mem_2", "site_flagship", "usr_admin", "admin", now);
+  insertMembership.run("mem_dev_1", "site_flagship", "usr_developer", "developer", now);
   insertMembership.run("mem_3", "site_flagship", "usr_editor", "editor", now);
   insertMembership.run("mem_4", "site_flagship", "usr_author", "author", now);
 
   insertMembership.run("mem_5", "site_northwind", "usr_owner", "owner", now);
+  insertMembership.run("mem_dev_2", "site_northwind", "usr_developer", "developer", now);
   insertMembership.run("mem_6", "site_northwind", "usr_editor", "editor", now);
 
   // 4. Seed Taxonomies
@@ -1198,8 +1259,9 @@ export function listDemoUsers(): Array<UserRecord & { primaryRole: SiteRole }> {
        ORDER BY CASE m.role
          WHEN 'owner' THEN 1
          WHEN 'admin' THEN 2
-         WHEN 'editor' THEN 3
-         ELSE 4
+         WHEN 'developer' THEN 3
+         WHEN 'editor' THEN 4
+         ELSE 5
        END`
     )
     .all() as Record<string, unknown>[];
@@ -1396,8 +1458,9 @@ export function listSiteMembers(siteId: string): Array<{
        ORDER BY CASE m.role
          WHEN 'owner' THEN 1
          WHEN 'admin' THEN 2
-         WHEN 'editor' THEN 3
-         ELSE 4
+         WHEN 'developer' THEN 3
+         WHEN 'editor' THEN 4
+         ELSE 5
        END`
     )
     .all(siteId) as Record<string, unknown>[];
@@ -2491,7 +2554,7 @@ export function installNodePluginPackage(input: {
     };
   }
 
-  const official = OFFICIAL_NODE_PLUGIN_PACKAGES.find((p) => p.packageName === pkgName);
+  const official = NODE_PLUGIN_DIRECTORY.find((p) => p.packageName === pkgName);
   const displayName =
     input.displayName?.trim() ||
     official?.displayName ||
